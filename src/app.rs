@@ -175,8 +175,8 @@ fn key_value_block(entries: &[(&str, String)]) -> String {
 fn render_strings(values: &[String], format: Option<&str>) -> Result<String> {
     match format.unwrap_or("text") {
         "json" => Ok(serde_json::to_string_pretty(values)?),
-        "csv" => render_table(&["value"], &values.iter().map(|value| vec![value.clone()]).collect::<Vec<_>>(), b','),
-        "tsv" => render_table(&["value"], &values.iter().map(|value| vec![value.clone()]).collect::<Vec<_>>(), b'\t'),
+        "csv" => render_table(&["value"], values.iter().map(|value| [value]), b','),
+        "tsv" => render_table(&["value"], values.iter().map(|value| [value]), b'\t'),
         _ => Ok(values.join("\n")),
     }
 }
@@ -274,7 +274,12 @@ fn render_value_rows(headers: &[&str], rows: &[Value], delimiter: u8) -> Result<
     render_table(headers, &mapped, delimiter)
 }
 
-fn render_table(headers: &[&str], rows: &[Vec<String>], delimiter: u8) -> Result<String> {
+fn render_table<I, T>(headers: &[&str], rows: I, delimiter: u8) -> Result<String>
+where
+    I: IntoIterator<Item = T>,
+    T: IntoIterator,
+    T::Item: AsRef<[u8]>,
+{
     let mut writer = WriterBuilder::new()
         .delimiter(delimiter)
         .from_writer(Vec::new());
@@ -469,7 +474,7 @@ fn open_url(url: &str) -> Result<()> {
     let commands: &[(&str, &[&str])] = &[
         ("termux-open-url", &[]),
         ("xdg-open", &[]),
-        ("cmd", &["/c", "start"]),
+        ("explorer", &[]),
     ];
     for (program, prefix) in commands {
         let mut command = Command::new(program);
@@ -1030,7 +1035,11 @@ impl App {
         let mut counts = HashMap::<String, usize>::new();
         for meta in index.markdown.values() {
             for tag in &meta.tags {
-                *counts.entry(tag.clone()).or_default() += 1;
+                if let Some(count) = counts.get_mut(tag) {
+                    *count += 1;
+                } else {
+                    counts.insert(tag.clone(), 1);
+                }
             }
         }
         let mut rows = counts.into_iter().collect::<Vec<_>>();
@@ -1229,7 +1238,11 @@ impl App {
         for meta in index.markdown.values() {
             for name in meta.properties.keys() {
                 if name_filter.is_none_or(|target| target == name) {
-                    *counts.entry(name.clone()).or_default() += 1;
+                    if let Some(count) = counts.get_mut(name) {
+                        *count += 1;
+                    } else {
+                        counts.insert(name.clone(), 1);
+                    }
                 }
             }
         }
@@ -1509,6 +1522,9 @@ impl App {
     fn cmd_plugin_uninstall(&self, invocation: &Invocation) -> Result<String> {
         let vault = self.workspace.open_vault(invocation.global.vault.as_deref())?;
         let id = required_param(invocation, "id")?;
+        if id.is_empty() || id.contains('/') || id.contains('\\') || id == ".." || id == "." {
+            bail!("invalid plugin id");
+        }
         let plugin_dir = vault.obsidian_dir.join("plugins").join(id);
         if plugin_dir.exists() {
             fs::remove_dir_all(&plugin_dir)?;
@@ -1577,6 +1593,9 @@ impl App {
     fn cmd_theme_uninstall(&self, invocation: &Invocation) -> Result<String> {
         let vault = self.workspace.open_vault(invocation.global.vault.as_deref())?;
         let name = required_param(invocation, "name")?;
+        if name.is_empty() || name.contains('/') || name.contains('\\') || name == ".." || name == "." {
+            bail!("invalid theme name");
+        }
         let theme_dir = vault.obsidian_dir.join("themes").join(name);
         if theme_dir.exists() {
             fs::remove_dir_all(&theme_dir)?;

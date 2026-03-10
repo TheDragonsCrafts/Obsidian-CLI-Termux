@@ -143,8 +143,7 @@ fn decode_value(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
-
-    use super::{Request, parse};
+    use super::{Request, parse, parse_line};
 
     #[test]
     fn parses_command_with_params_and_flags() -> Result<()> {
@@ -176,5 +175,43 @@ mod tests {
     fn empty_is_interactive() -> Result<()> {
         assert!(matches!(parse(&[])?, Request::Interactive));
         Ok(())
+    }
+
+    #[test]
+    fn parse_line_with_quotes() {
+        let line = "vault=\"My Vault\" append file=\"Inbox\" content=\"hello\\nworld\" inline --copy";
+
+        let Request::Invocation(inv) = parse_line(line).unwrap() else {
+            panic!("expected invocation");
+        };
+
+        assert_eq!(inv.global.vault.as_deref(), Some("My Vault"));
+        assert_eq!(inv.command, "append");
+        assert_eq!(inv.param("file"), Some("Inbox"));
+        assert_eq!(inv.param("content"), Some("hello\nworld"));
+        assert!(inv.positionals.contains(&"inline".to_string()));
+        assert!(inv.has_flag("inline"));
+        assert!(inv.global.copy);
+    }
+
+    #[test]
+    fn parse_line_empty() -> Result<()> {
+        assert!(matches!(parse_line("")?, Request::Interactive));
+        assert!(matches!(parse_line("   ")?, Request::Interactive));
+        Ok(())
+    }
+
+    #[test]
+    fn parse_line_unbalanced_quotes() -> Result<()> {
+        // shlex::split will return None for this, leading to unwrap_or_default() returning an empty vec.
+        // Thus parse will return Request::Interactive.
+        assert!(matches!(parse_line("vault=\"Main")?, Request::Interactive));
+        Ok(())
+    }
+
+    #[test]
+    fn parse_line_missing_command() {
+        let err = parse_line("vault=Main --copy someparam=somevalue").unwrap_err();
+        assert_eq!(err.to_string(), "faltó el comando después de los parámetros globales");
     }
 }
