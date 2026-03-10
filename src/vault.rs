@@ -1047,11 +1047,32 @@ fn resolve_link_target(note_paths: &[NotePath], link: &str, active_file: Option<
 
     let mut candidates = note_paths
         .iter()
-        .filter_map(|candidate| {
-            if candidate.stem_lower == stem
-                || candidate.path_no_ext_lower.ends_with(&normalized_lower)
+        .filter_map(|path| {
+            let base = Path::new(&path.path)
+                .file_stem()
+                .and_then(OsStr::to_str)
+                .unwrap_or_default();
+            if base.eq_ignore_ascii_case(&stem) {
+                return Some((score_candidate(&source_dir, &path.path), path.path.clone()));
+            }
+
+            let path_bytes = path.path.as_bytes();
+            let path_no_ext = if path.path.ends_with(".md")
+                || path.path.ends_with(".MD")
+                || path.path.ends_with(".mD")
+                || path.path.ends_with(".Md")
             {
-                Some((score_candidate(&source_dir, &candidate.path), candidate.path.clone()))
+                &path_bytes[..path_bytes.len() - 3]
+            } else {
+                path_bytes
+            };
+            let path_no_ext = std::str::from_utf8(path_no_ext).unwrap_or_default();
+
+            if path_no_ext
+                .to_ascii_lowercase()
+                .ends_with(&normalized_lower)
+            {
+                Some((score_candidate(&source_dir, &path.path), path.path.clone()))
             } else {
                 None
             }
