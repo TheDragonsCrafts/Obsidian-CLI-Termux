@@ -481,6 +481,7 @@ impl VaultContext {
         let mut index = VaultIndex {
             files,
             markdown: BTreeMap::new(),
+            note_paths: Vec::new(),
             resolved_links: BTreeMap::new(),
             unresolved_links: BTreeMap::new(),
             backlinks: BTreeMap::new(),
@@ -488,6 +489,7 @@ impl VaultContext {
 
         for entry in next_entries {
             if let Some(markdown) = entry.markdown {
+                index.note_paths.push(NotePath::new(&entry.rel_path));
                 index.markdown.insert(entry.rel_path, markdown);
             }
         }
@@ -601,27 +603,20 @@ impl VaultIndex {
             .map(|path| normalize_rel_path(&path.to_string_lossy()))
             .unwrap_or_default();
 
+        let normalized_lower = normalized.to_ascii_lowercase();
+        let target_suffix = format!("/{normalized_lower}");
+
         let mut ranked = self
-            .markdown
-            .keys()
+            .note_paths
+            .iter()
             .filter_map(|candidate| {
-                let candidate_no_ext = candidate.trim_end_matches(".md");
-                let candidate_name = Path::new(candidate_no_ext)
-                    .file_name()
-                    .and_then(OsStr::to_str)
-                    .unwrap_or(candidate_no_ext)
-                    .to_ascii_lowercase();
-                if candidate.eq_ignore_ascii_case(&normalized)
-                    || candidate_no_ext.eq_ignore_ascii_case(&normalized)
-                    || candidate_name == stem
-                    || candidate
-                        .to_ascii_lowercase()
-                        .ends_with(&format!("/{normalized}"))
-                    || candidate_no_ext
-                        .to_ascii_lowercase()
-                        .ends_with(&format!("/{normalized}"))
+                if candidate.path_lower == normalized_lower
+                    || candidate.path_no_ext_lower == normalized_lower
+                    || candidate.stem_lower == stem
+                    || candidate.path_lower.ends_with(&target_suffix)
+                    || candidate.path_no_ext_lower.ends_with(&target_suffix)
                 {
-                    Some((score_candidate(&source_dir, candidate), candidate.clone()))
+                    Some((score_candidate(&source_dir, &candidate.path), candidate.path.clone()))
                 } else {
                     None
                 }
@@ -659,10 +654,9 @@ impl VaultIndex {
         self.unresolved_links.clear();
         self.backlinks.clear();
 
-        let note_paths = self.markdown.keys().cloned().collect::<Vec<_>>();
         for (path, meta) in &self.markdown {
             for link in &meta.links {
-                if let Some(target) = resolve_link_target(&note_paths, link, Some(path)) {
+                if let Some(target) = resolve_link_target(&self.note_paths, link, Some(path)) {
                     *self
                         .resolved_links
                         .entry(path.clone())
@@ -704,9 +698,38 @@ pub struct FileRecord {
 }
 
 #[derive(Debug, Clone, Default)]
+pub struct NotePath {
+    pub path: String,
+    pub path_lower: String,
+    pub path_no_ext_lower: String,
+    pub stem_lower: String,
+}
+
+impl NotePath {
+    pub fn new(path: &str) -> Self {
+        let path_lower = path.to_ascii_lowercase();
+        let path_no_ext = path.trim_end_matches(".md");
+        let path_no_ext_lower = path_no_ext.to_ascii_lowercase();
+        let stem_lower = Path::new(path_no_ext)
+            .file_name()
+            .and_then(OsStr::to_str)
+            .unwrap_or(path_no_ext)
+            .to_ascii_lowercase();
+
+        Self {
+            path: path.to_string(),
+            path_lower,
+            path_no_ext_lower,
+            stem_lower,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct VaultIndex {
     pub files: BTreeMap<String, FileRecord>,
     pub markdown: BTreeMap<String, MarkdownMeta>,
+    pub note_paths: Vec<NotePath>,
     pub resolved_links: BTreeMap<String, BTreeMap<String, usize>>,
     pub unresolved_links: BTreeMap<String, BTreeMap<String, usize>>,
     pub backlinks: BTreeMap<String, BTreeMap<String, usize>>,
@@ -997,18 +1020,17 @@ fn score_candidate(source_dir: &str, candidate: &str) -> i32 {
     score
 }
 
-fn resolve_link_target(note_paths: &[String], link: &str, active_file: Option<&str>) -> Option<String> {
+fn resolve_link_target(note_paths: &[NotePath], link: &str, active_file: Option<&str>) -> Option<String> {
     let normalized = normalize_rel_path(link).trim_end_matches(".md").to_string();
     let exact = if normalized.ends_with(".md") {
         normalized.clone()
     } else {
         format!("{normalized}.md")
     };
-    if note_paths.iter().any(|path| path.eq_ignore_ascii_case(&exact)) {
-        return note_paths
-            .iter()
-            .find(|path| path.eq_ignore_ascii_case(&exact))
-            .cloned();
+
+    let exact_lower = exact.to_ascii_lowercase();
+    if let Some(matched) = note_paths.iter().find(|path| path.path_lower == exact_lower) {
+        return Some(matched.path.clone());
     }
 
     let stem = Path::new(&normalized)
@@ -1020,21 +1042,16 @@ fn resolve_link_target(note_paths: &[String], link: &str, active_file: Option<&s
         .and_then(|path| Path::new(path).parent())
         .map(|path| normalize_rel_path(&path.to_string_lossy()))
         .unwrap_or_default();
+
+    let normalized_lower = normalized.to_ascii_lowercase();
+
     let mut candidates = note_paths
         .iter()
-        .filter_map(|path| {
-            let base = Path::new(path)
-                .file_stem()
-                .and_then(OsStr::to_str)
-                .unwrap_or_default()
-                .to_ascii_lowercase();
-            if base == stem
-                || path
-                    .trim_end_matches(".md")
-                    .to_ascii_lowercase()
-                    .ends_with(&normalized.to_ascii_lowercase())
+        .filter_map(|candidate| {
+            if candidate.stem_lower == stem
+                || candidate.path_no_ext_lower.ends_with(&normalized_lower)
             {
-                Some((score_candidate(&source_dir, path), path.clone()))
+                Some((score_candidate(&source_dir, &candidate.path), candidate.path.clone()))
             } else {
                 None
             }

@@ -3,6 +3,10 @@ name = "obsidian-termux-cli"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "obsidian_termux_cli"
+path = "src/lib.rs"
+
 [[bin]]
 name = "obsidian"
 path = "src/main.rs"
@@ -23,3 +27,10 @@ serde_yaml = "0.9"
 sha1 = "0.10"
 shlex = "1.3"
 walkdir = "2.5"
+
+[dev-dependencies]
+criterion = "0.8.2"
+
+[[bench]]
+name = "resolve_note"
+harness = false
