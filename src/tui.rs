@@ -4,18 +4,18 @@ use std::time::Duration;
 
 use anyhow::Result;
 use chrono::Local;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEventKind};
+use crossterm::event::{
+    self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEventKind,
+};
 use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
+use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::prelude::{Alignment, Color, Frame, Line, Modifier, Position, Span, Style, Text};
-use ratatui::widgets::{
-    Block, BorderType, Borders, List, ListItem, ListState, Paragraph, Wrap,
-};
-use ratatui::Terminal;
+use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph, Wrap};
 
 use crate::app::App;
 use crate::parser::{Request, parse_line};
@@ -231,7 +231,9 @@ impl DashboardState {
 
 fn handle_key(app: &mut App, state: &mut DashboardState, key: KeyEvent) -> Result<bool> {
     match key.code {
-        KeyCode::Char('q') if key.modifiers.is_empty() && state.input.is_empty() => return Ok(true),
+        KeyCode::Char('q') if key.modifiers.is_empty() && state.input.is_empty() => {
+            return Ok(true);
+        }
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => return Ok(true),
         KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             state.runs.clear();
@@ -272,7 +274,9 @@ fn handle_key(app: &mut App, state: &mut DashboardState, key: KeyEvent) -> Resul
         }
         KeyCode::Tab => insert_selected_suggestion(app, state),
         KeyCode::Enter => submit_or_fill(app, state)?,
-        KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => insert_char(state, ch),
+        KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+            insert_char(state, ch)
+        }
         _ => {}
     }
 
@@ -286,11 +290,18 @@ fn draw(
     commands: &[&'static CommandSpec],
 ) {
     let area = frame.area();
-    frame.render_widget(Block::default().style(Style::default().bg(color_bg())), area);
+    frame.render_widget(
+        Block::default().style(Style::default().bg(color_bg())),
+        area,
+    );
 
     let vertical = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(12), Constraint::Length(6)])
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(12),
+            Constraint::Length(6),
+        ])
         .split(area);
 
     draw_header(frame, app, state, vertical[0]);
@@ -310,7 +321,11 @@ fn draw(
     } else {
         let stacked = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Length(14), Constraint::Min(8), Constraint::Length(8)])
+            .constraints([
+                Constraint::Length(14),
+                Constraint::Min(8),
+                Constraint::Length(8),
+            ])
             .split(vertical[1]);
         draw_command_browser(frame, state, commands, stacked[0]);
         draw_output(frame, state, stacked[1]);
@@ -335,9 +350,19 @@ fn draw_header(frame: &mut Frame<'_>, app: &App, state: &DashboardState, area: R
         .unwrap_or_else(|| "none".to_string());
 
     let title = Line::from(vec![
-        Span::styled("Obsidian", Style::default().fg(color_text()).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "Obsidian",
+            Style::default()
+                .fg(color_text())
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" // ", Style::default().fg(color_muted())),
-        Span::styled("Termux TUI", Style::default().fg(color_accent()).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "Termux TUI",
+            Style::default()
+                .fg(color_accent())
+                .add_modifier(Modifier::BOLD),
+        ),
     ]);
 
     let meta = Line::from(vec![
@@ -360,7 +385,10 @@ fn draw_header(frame: &mut Frame<'_>, app: &App, state: &DashboardState, area: R
             status_color(state.status.level),
         ),
         Span::raw(" "),
-        Span::styled(state.status.message.as_str(), Style::default().fg(color_text())),
+        Span::styled(
+            state.status.message.as_str(),
+            Style::default().fg(color_text()),
+        ),
     ]);
 
     let widget = Paragraph::new(Text::from(vec![title, meta, status]))
@@ -385,7 +413,12 @@ fn draw_command_browser(
             };
             ListItem::new(vec![
                 Line::from(vec![
-                    Span::styled(spec.name, Style::default().fg(color_text()).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        spec.name,
+                        Style::default()
+                            .fg(color_text())
+                            .add_modifier(Modifier::BOLD),
+                    ),
                     Span::raw("  "),
                     Span::styled(
                         support,
@@ -425,7 +458,10 @@ fn draw_output(frame: &mut Frame<'_>, state: &DashboardState, area: Rect) {
         format!("Last Error  [{}]", command)
     };
     let paragraph = Paragraph::new(output)
-        .block(panel_block(&title, if ok { color_local() } else { color_error() }))
+        .block(panel_block(
+            &title,
+            if ok { color_local() } else { color_error() },
+        ))
         .style(Style::default().fg(color_text()).bg(color_surface()))
         .wrap(Wrap { trim: false })
         .scroll((state.output_scroll, 0));
@@ -471,7 +507,11 @@ fn draw_runs(frame: &mut Frame<'_>, state: &DashboardState, area: Rect) {
 fn draw_input(frame: &mut Frame<'_>, app: &App, state: &DashboardState, area: Rect) {
     let sections = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Length(1), Constraint::Length(2)])
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Length(1),
+            Constraint::Length(2),
+        ])
         .split(area);
 
     let input = Paragraph::new(state.input.as_str())
@@ -488,7 +528,9 @@ fn draw_input(frame: &mut Frame<'_>, app: &App, state: &DashboardState, area: Re
     } else {
         let mut spans = vec![Span::styled(
             "Suggestions ",
-            Style::default().fg(color_muted()).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(color_muted())
+                .add_modifier(Modifier::BOLD),
         )];
         for (index, suggestion) in suggestions.iter().take(5).enumerate() {
             if index > 0 {
@@ -504,15 +546,40 @@ fn draw_input(frame: &mut Frame<'_>, app: &App, state: &DashboardState, area: Re
     frame.render_widget(Paragraph::new(suggestions_line), sections[1]);
 
     let shortcuts = Line::from(vec![
-        Span::styled("Enter", Style::default().fg(color_text()).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "Enter",
+            Style::default()
+                .fg(color_text())
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" run  ", Style::default().fg(color_muted())),
-        Span::styled("Tab", Style::default().fg(color_text()).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "Tab",
+            Style::default()
+                .fg(color_text())
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" insert  ", Style::default().fg(color_muted())),
-        Span::styled("Ctrl+P/N", Style::default().fg(color_text()).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "Ctrl+P/N",
+            Style::default()
+                .fg(color_text())
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" history  ", Style::default().fg(color_muted())),
-        Span::styled("PgUp/PgDn", Style::default().fg(color_text()).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "PgUp/PgDn",
+            Style::default()
+                .fg(color_text())
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" scroll  ", Style::default().fg(color_muted())),
-        Span::styled("q", Style::default().fg(color_text()).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "q",
+            Style::default()
+                .fg(color_text())
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" quit", Style::default().fg(color_muted())),
     ]);
     frame.render_widget(Paragraph::new(shortcuts), sections[2]);
@@ -710,7 +777,11 @@ fn suggestion_tokens(
     }
 
     if state.input.trim().is_empty() || !state.input.contains(' ') {
-        return commands.iter().take(6).map(|spec| spec.name.to_string()).collect();
+        return commands
+            .iter()
+            .take(6)
+            .map(|spec| spec.name.to_string())
+            .collect();
     }
 
     COMMON_TOKENS
@@ -720,7 +791,12 @@ fn suggestion_tokens(
         .collect()
 }
 
-fn replace_current_token(input: &mut String, cursor: &mut usize, replacement: &str, add_space: bool) {
+fn replace_current_token(
+    input: &mut String,
+    cursor: &mut usize,
+    replacement: &str,
+    add_space: bool,
+) {
     let (start, end) = token_bounds(input, *cursor);
     let mut next = String::new();
     next.push_str(&input[..start]);
@@ -796,7 +872,12 @@ fn panel_block(title: &str, color: Color) -> Block<'_> {
         .style(Style::default().bg(color_surface()))
         .title(Line::from(vec![
             Span::styled(" ", Style::default().bg(color_surface())),
-            Span::styled(title, Style::default().fg(color_text()).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                title,
+                Style::default()
+                    .fg(color_text())
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(" ", Style::default().bg(color_surface())),
         ]))
 }
