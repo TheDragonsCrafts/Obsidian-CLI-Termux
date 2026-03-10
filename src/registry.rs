@@ -194,3 +194,59 @@ const fn spec(
         support,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_support_level_label() {
+        assert_eq!(SupportLevel::Local.label(), "local");
+        assert_eq!(SupportLevel::Hybrid.label(), "hybrid");
+        assert_eq!(SupportLevel::BridgeOnly.label(), "bridge");
+    }
+
+    #[test]
+    fn test_find_existing_command() {
+        let cmd = find("help").expect("Should find 'help' command");
+        assert_eq!(cmd.name, "help");
+        assert_eq!(cmd.category, "General");
+        assert_eq!(cmd.support, SupportLevel::Local);
+    }
+
+    #[test]
+    fn test_find_non_existing_command() {
+        assert!(find("unknown_command_123").is_none());
+    }
+
+    #[test]
+    fn test_overview_structure() {
+        let out = overview();
+
+        // Assert header is present
+        assert!(out.contains("Obsidian CLI for Termux (Rust)"));
+        assert!(out.contains("Compatibilidad de sintaxis"));
+
+        // Assert some categories are present
+        assert!(out.contains("\nGeneral\n"));
+        assert!(out.contains("\nFiles\n"));
+
+        // Assert some specific commands are present
+        assert!(out.contains("  help [local] "));
+        assert!(out.contains("  publish:site [bridge] "));
+    }
+
+    #[test]
+    fn test_command_help_existing() {
+        let help = command_help("help").expect("Should return help for 'help'");
+        assert!(help.contains("help\n"));
+        assert!(help.contains("category: General\n"));
+        assert!(help.contains("support: [local]\n"));
+        assert!(help.contains("summary: Muestra ayuda general o de un comando"));
+    }
+
+    #[test]
+    fn test_command_help_non_existing() {
+        assert!(command_help("unknown_command_123").is_none());
+    }
+}
