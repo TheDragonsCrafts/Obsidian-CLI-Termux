@@ -1514,6 +1514,9 @@ impl App {
     fn cmd_plugin_uninstall(&self, invocation: &Invocation) -> Result<String> {
         let vault = self.workspace.open_vault(invocation.global.vault.as_deref())?;
         let id = required_param(invocation, "id")?;
+        if id.is_empty() || id.contains('/') || id.contains('\\') || id == ".." || id == "." {
+            bail!("invalid plugin id");
+        }
         let plugin_dir = vault.obsidian_dir.join("plugins").join(id);
         if plugin_dir.exists() {
             fs::remove_dir_all(&plugin_dir)?;
@@ -1582,6 +1585,9 @@ impl App {
     fn cmd_theme_uninstall(&self, invocation: &Invocation) -> Result<String> {
         let vault = self.workspace.open_vault(invocation.global.vault.as_deref())?;
         let name = required_param(invocation, "name")?;
+        if name.is_empty() || name.contains('/') || name.contains('\\') || name == ".." || name == "." {
+            bail!("invalid theme name");
+        }
         let theme_dir = vault.obsidian_dir.join("themes").join(name);
         if theme_dir.exists() {
             fs::remove_dir_all(&theme_dir)?;
