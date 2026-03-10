@@ -1237,7 +1237,14 @@ pub fn count_bytes(records: &[FileRecord]) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{moment_to_chrono, normalize_rel_path, parse_markdown};
+    use super::{moment_to_chrono, normalize_rel_path, parse_markdown, read_frontmatter};
+    use std::path::Path;
+
+    #[test]
+    fn read_frontmatter_missing_file_returns_err() {
+        let result = read_frontmatter(Path::new("/does/not/exist/missing.md"));
+        assert!(result.is_err());
+    }
 
     #[test]
     fn parses_markdown_metadata() {
