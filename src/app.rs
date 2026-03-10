@@ -474,7 +474,7 @@ fn open_url(url: &str) -> Result<()> {
     let commands: &[(&str, &[&str])] = &[
         ("termux-open-url", &[]),
         ("xdg-open", &[]),
-        ("cmd", &["/c", "start"]),
+        ("explorer", &[]),
     ];
     for (program, prefix) in commands {
         let mut command = Command::new(program);
