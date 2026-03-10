@@ -15,7 +15,7 @@ fn bench_resolve_note(c: &mut Criterion) {
         });
         index.markdown.insert(path.clone(), MarkdownMeta::default());
         index.note_paths.push(obsidian_termux_cli::vault::NotePath::new(&path));
-
+    }
 
     c.bench_function("resolve_note_not_found", |b| {
         b.iter(|| {
