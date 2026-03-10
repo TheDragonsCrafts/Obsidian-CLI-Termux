@@ -1030,7 +1030,11 @@ impl App {
         let mut counts = HashMap::<String, usize>::new();
         for meta in index.markdown.values() {
             for tag in &meta.tags {
-                *counts.entry(tag.clone()).or_default() += 1;
+                if let Some(count) = counts.get_mut(tag) {
+                    *count += 1;
+                } else {
+                    counts.insert(tag.clone(), 1);
+                }
             }
         }
         let mut rows = counts.into_iter().collect::<Vec<_>>();
@@ -1229,7 +1233,11 @@ impl App {
         for meta in index.markdown.values() {
             for name in meta.properties.keys() {
                 if name_filter.is_none_or(|target| target == name) {
-                    *counts.entry(name.clone()).or_default() += 1;
+                    if let Some(count) = counts.get_mut(name) {
+                        *count += 1;
+                    } else {
+                        counts.insert(name.clone(), 1);
+                    }
                 }
             }
         }
