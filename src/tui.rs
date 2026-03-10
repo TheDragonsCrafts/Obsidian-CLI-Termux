@@ -11,7 +11,7 @@ use crossterm::terminal::{
 };
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::prelude::{Alignment, Color, Frame, Line, Modifier, Position, Span, Style, Stylize, Text};
+use ratatui::prelude::{Alignment, Color, Frame, Line, Modifier, Position, Span, Style, Text};
 use ratatui::widgets::{
     Block, BorderType, Borders, List, ListItem, ListState, Paragraph, Wrap,
 };
@@ -855,4 +855,25 @@ fn color_local() -> Color {
 
 fn color_error() -> Color {
     Color::Rgb(255, 109, 122)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{replace_current_token, token_bounds};
+
+    #[test]
+    fn token_bounds_find_current_word() {
+        let input = "append file=Inbox content=test";
+        assert_eq!(token_bounds(input, 9), (7, 17));
+        assert_eq!(token_bounds(input, input.len()), (18, input.len()));
+    }
+
+    #[test]
+    fn replace_current_token_inserts_spacing() {
+        let mut input = "rea".to_string();
+        let mut cursor = input.len();
+        replace_current_token(&mut input, &mut cursor, "read", true);
+        assert_eq!(input, "read ");
+        assert_eq!(cursor, 5);
+    }
 }
