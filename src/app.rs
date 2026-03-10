@@ -175,8 +175,8 @@ fn key_value_block(entries: &[(&str, String)]) -> String {
 fn render_strings(values: &[String], format: Option<&str>) -> Result<String> {
     match format.unwrap_or("text") {
         "json" => Ok(serde_json::to_string_pretty(values)?),
-        "csv" => render_table(&["value"], &values.iter().map(|value| vec![value.clone()]).collect::<Vec<_>>(), b','),
-        "tsv" => render_table(&["value"], &values.iter().map(|value| vec![value.clone()]).collect::<Vec<_>>(), b'\t'),
+        "csv" => render_table(&["value"], values.iter().map(|value| [value]), b','),
+        "tsv" => render_table(&["value"], values.iter().map(|value| [value]), b'\t'),
         _ => Ok(values.join("\n")),
     }
 }
@@ -274,7 +274,12 @@ fn render_value_rows(headers: &[&str], rows: &[Value], delimiter: u8) -> Result<
     render_table(headers, &mapped, delimiter)
 }
 
-fn render_table(headers: &[&str], rows: &[Vec<String>], delimiter: u8) -> Result<String> {
+fn render_table<I, T>(headers: &[&str], rows: I, delimiter: u8) -> Result<String>
+where
+    I: IntoIterator<Item = T>,
+    T: IntoIterator,
+    T::Item: AsRef<[u8]>,
+{
     let mut writer = WriterBuilder::new()
         .delimiter(delimiter)
         .from_writer(Vec::new());
