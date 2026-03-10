@@ -581,10 +581,10 @@ impl App {
 
     fn cmd_vaults(&self, invocation: &Invocation) -> Result<String> {
         let mut vaults = self.workspace.known_vaults.clone();
-        if vaults.is_empty() {
-            if let Ok(current) = self.workspace.resolve_vault(None) {
-                vaults.push(current);
-            }
+        if vaults.is_empty()
+            && let Ok(current) = self.workspace.resolve_vault(None)
+        {
+            vaults.push(current);
         }
 
         if invocation.has_flag("total") {
@@ -1041,10 +1041,10 @@ impl App {
             if !file.is_markdown && !is_text_candidate(&file.rel_path) {
                 continue;
             }
-            if let Some(scope) = scope.as_deref() {
-                if !file.rel_path.starts_with(scope) {
-                    continue;
-                }
+            if let Some(scope) = scope.as_deref()
+                && !file.rel_path.starts_with(scope)
+            {
+                continue;
             }
             let Ok(text) = vault.read_text(&file.rel_path) else {
                 continue;
@@ -1171,15 +1171,15 @@ impl App {
 
         let mut rows = Vec::new();
         for (path, meta) in &index.markdown {
-            if let Some(selected) = selected_path.as_deref() {
-                if path != selected {
-                    continue;
-                }
+            if let Some(selected) = selected_path.as_deref()
+                && path != selected
+            {
+                continue;
             }
-            if let Some(daily) = current_daily.as_deref() {
-                if path != daily {
-                    continue;
-                }
+            if let Some(daily) = current_daily.as_deref()
+                && path != daily
+            {
+                continue;
             }
             for task in &meta.tasks {
                 if !task_matches(task, invocation) {
