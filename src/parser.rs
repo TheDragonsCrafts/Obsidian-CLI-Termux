@@ -142,10 +142,12 @@ fn decode_value(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use anyhow::Result;
+
     use super::{Request, parse};
 
     #[test]
-    fn parses_command_with_params_and_flags() {
+    fn parses_command_with_params_and_flags() -> Result<()> {
         let args = vec![
             "vault=Main".to_string(),
             "append".to_string(),
@@ -155,7 +157,7 @@ mod tests {
             "--copy".to_string(),
         ];
 
-        let Request::Invocation(inv) = parse(&args).unwrap() else {
+        let Request::Invocation(inv) = parse(&args)? else {
             panic!("expected invocation");
         };
 
@@ -166,10 +168,13 @@ mod tests {
         assert!(inv.positionals.contains(&"inline".to_string()));
         assert!(inv.has_flag("inline"));
         assert!(inv.global.copy);
+
+        Ok(())
     }
 
     #[test]
-    fn empty_is_interactive() {
-        assert!(matches!(parse(&[]).unwrap(), Request::Interactive));
+    fn empty_is_interactive() -> Result<()> {
+        assert!(matches!(parse(&[])?, Request::Interactive));
+        Ok(())
     }
 }
