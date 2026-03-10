@@ -23,3 +23,10 @@ serde_yaml = "0.9"
 sha1 = "0.10"
 shlex = "1.3"
 walkdir = "2.5"
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "search_benchmark"
+harness = false

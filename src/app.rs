@@ -311,11 +311,13 @@ fn create_target_path(invocation: &Invocation) -> Result<String> {
     Ok(path)
 }
 
+/// Checks if a line contains a search query.
+/// If `case_sensitive` is false, `query` MUST already be lowercased.
 fn contains_query(line: &str, query: &str, case_sensitive: bool) -> bool {
     if case_sensitive {
         line.contains(query)
     } else {
-        line.to_ascii_lowercase().contains(&query.to_ascii_lowercase())
+        line.to_ascii_lowercase().contains(query)
     }
 }
 
@@ -953,6 +955,11 @@ impl App {
             .and_then(|value| value.parse::<usize>().ok())
             .unwrap_or(usize::MAX);
         let case_sensitive = invocation.has_flag("case");
+        let search_query = if case_sensitive {
+            query.to_string()
+        } else {
+            query.to_ascii_lowercase()
+        };
         let scope = invocation.param("path").map(normalize_rel_path);
         let mut hits = Vec::<Value>::new();
         let mut seen_files = BTreeSet::new();
@@ -973,7 +980,7 @@ impl App {
                 continue;
             };
             for (index, line) in text.lines().enumerate() {
-                if !contains_query(line, query, case_sensitive) {
+                if !contains_query(line, &search_query, case_sensitive) {
                     continue;
                 }
                 if with_context {
