@@ -1026,18 +1026,31 @@ fn resolve_link_target(note_paths: &[String], link: &str, active_file: Option<&s
             let base = Path::new(path)
                 .file_stem()
                 .and_then(OsStr::to_str)
-                .unwrap_or_default()
-                .to_ascii_lowercase();
-            if base == stem
-                || path
-                    .trim_end_matches(".md")
-                    .to_ascii_lowercase()
-                    .ends_with(&normalized.to_ascii_lowercase())
-            {
-                Some((score_candidate(&source_dir, path), path.clone()))
-            } else {
-                None
+                .unwrap_or_default();
+            if base.eq_ignore_ascii_case(&stem) {
+                return Some((score_candidate(&source_dir, path), path.clone()));
             }
+
+            let path_bytes = path.as_bytes();
+            let path_no_ext = if path.ends_with(".md")
+                || path.ends_with(".MD")
+                || path.ends_with(".mD")
+                || path.ends_with(".Md")
+            {
+                &path_bytes[..path_bytes.len() - 3]
+            } else {
+                path_bytes
+            };
+
+            let norm_bytes = normalized.as_bytes();
+            if path_no_ext.len() >= norm_bytes.len() {
+                let tail = &path_no_ext[path_no_ext.len() - norm_bytes.len()..];
+                if tail.eq_ignore_ascii_case(norm_bytes) {
+                    return Some((score_candidate(&source_dir, path), path.clone()));
+                }
+            }
+
+            None
         })
         .collect::<Vec<_>>();
     candidates.sort_by(|left, right| right.0.cmp(&left.0).then(left.1.cmp(&right.1)));
