@@ -22,9 +22,8 @@ static TASK_RE: Lazy<Regex> = Lazy::new(|| {
 static WIKILINK_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"\[\[(?P<link>[^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]").expect("wikilink regex")
 });
-static MD_LINK_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"\[[^\]]+\]\((?P<link>[^)]+)\)").expect("markdown link regex")
-});
+static MD_LINK_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\[[^\]]+\]\((?P<link>[^)]+)\)").expect("markdown link regex"));
 static TAG_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?:^|[^[:alnum:]_/])(?P<tag>#(?:[[:alnum:]_-]+(?:/[[:alnum:]_-]+)*))")
         .expect("tag regex")
@@ -227,7 +226,9 @@ impl VaultContext {
     fn new(runtime: RuntimePaths, vault: KnownVault) -> Self {
         let root = vault.path_buf();
         let obsidian_dir = root.join(".obsidian");
-        let cache_file = runtime.cache_dir.join(format!("{}.json", vault_hash(&root)));
+        let cache_file = runtime
+            .cache_dir
+            .join(format!("{}.json", vault_hash(&root)));
         Self {
             name: vault.name,
             root,
@@ -548,9 +549,7 @@ impl VaultContext {
 
     pub fn ensure_daily_note_path(&self) -> Result<String> {
         let settings = self.daily_settings()?;
-        let format = settings
-            .format
-            .unwrap_or_else(|| "YYYY-MM-DD".to_string());
+        let format = settings.format.unwrap_or_else(|| "YYYY-MM-DD".to_string());
         let folder = settings.folder.unwrap_or_default();
         let chrono_format = moment_to_chrono(&format);
         let name = Local::now().format(&chrono_format).to_string();
@@ -576,7 +575,9 @@ impl VaultContext {
 impl VaultIndex {
     pub fn resolve_note(&self, selector: &str, active_file: Option<&str>) -> Result<String> {
         let selector = selector.trim();
-        let normalized = normalize_rel_path(selector).trim_end_matches(".md").to_string();
+        let normalized = normalize_rel_path(selector)
+            .trim_end_matches(".md")
+            .to_string();
         let stem = Path::new(&normalized)
             .file_name()
             .and_then(OsStr::to_str)
@@ -752,7 +753,12 @@ struct CachedFileEntry {
     markdown: Option<MarkdownMeta>,
 }
 
-fn build_cached_entry(rel_path: &str, len: u64, modified_ms: u64, abs: &Path) -> Result<CachedFileEntry> {
+fn build_cached_entry(
+    rel_path: &str,
+    len: u64,
+    modified_ms: u64,
+    abs: &Path,
+) -> Result<CachedFileEntry> {
     let markdown = if is_markdown_path(abs) {
         let text = fs::read_to_string(abs).unwrap_or_default();
         Some(parse_markdown(&text))
@@ -788,7 +794,10 @@ pub fn parse_markdown(text: &str) -> MarkdownMeta {
 
         if let Some(captures) = HEADING_RE.captures(line) {
             headings.push(Heading {
-                level: captures.get(1).map(|token| token.as_str().len()).unwrap_or(1),
+                level: captures
+                    .get(1)
+                    .map(|token| token.as_str().len())
+                    .unwrap_or(1),
                 text: captures
                     .name("text")
                     .map(|token| token.as_str().trim().to_string())
@@ -903,7 +912,10 @@ pub fn replace_task_status(text: &str, line: usize, status: &str) -> Result<Stri
         .ok_or_else(|| anyhow!("línea fuera de rango"))?;
     let replaced = TASK_RE
         .replace(target, |captures: &Captures| {
-            let whole = captures.get(0).map(|token| token.as_str()).unwrap_or_default();
+            let whole = captures
+                .get(0)
+                .map(|token| token.as_str())
+                .unwrap_or_default();
             let slot = captures.name("status").expect("status capture");
             let whole_match = captures.get(0).expect("whole capture");
             let start = slot.start() - whole_match.start();
@@ -936,14 +948,21 @@ pub fn read_frontmatter(path: &Path) -> Result<BTreeMap<String, Value>> {
     if let Some(mapping) = yaml.as_mapping() {
         for (key, value) in mapping {
             if let Some(key) = key.as_str() {
-                result.insert(key.to_string(), serde_json::to_value(value).unwrap_or(Value::Null));
+                result.insert(
+                    key.to_string(),
+                    serde_json::to_value(value).unwrap_or(Value::Null),
+                );
             }
         }
     }
     Ok(result)
 }
 
-pub fn write_frontmatter(path: &Path, properties: &BTreeMap<String, Value>, body: &str) -> Result<()> {
+pub fn write_frontmatter(
+    path: &Path,
+    properties: &BTreeMap<String, Value>,
+    body: &str,
+) -> Result<()> {
     let mut yaml = serde_yaml::Mapping::new();
     for (key, value) in properties {
         yaml.insert(
@@ -997,14 +1016,21 @@ fn score_candidate(source_dir: &str, candidate: &str) -> i32 {
     score
 }
 
-fn resolve_link_target(note_paths: &[String], link: &str, active_file: Option<&str>) -> Option<String> {
+fn resolve_link_target(
+    note_paths: &[String],
+    link: &str,
+    active_file: Option<&str>,
+) -> Option<String> {
     let normalized = normalize_rel_path(link).trim_end_matches(".md").to_string();
     let exact = if normalized.ends_with(".md") {
         normalized.clone()
     } else {
         format!("{normalized}.md")
     };
-    if note_paths.iter().any(|path| path.eq_ignore_ascii_case(&exact)) {
+    if note_paths
+        .iter()
+        .any(|path| path.eq_ignore_ascii_case(&exact))
+    {
         return note_paths
             .iter()
             .find(|path| path.eq_ignore_ascii_case(&exact))
