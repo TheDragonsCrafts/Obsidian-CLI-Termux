@@ -849,26 +849,26 @@ pub fn parse_markdown(text: &str) -> MarkdownMeta {
             .trim_start_matches("---\n")
             .trim_end_matches("\n---\n")
             .trim_end_matches("\n...\n");
-        if let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(yaml_frontmatter) {
-            if let Some(mapping) = value.as_mapping() {
-                for (key, value) in mapping {
-                    if let Some(key) = key.as_str() {
-                        let json_value = serde_json::to_value(value).unwrap_or(Value::Null);
-                        if key == "aliases" || key == "alias" {
-                            aliases.extend(value_to_strings(&json_value));
-                        }
-                        if key == "tags" {
-                            for tag in value_to_strings(&json_value) {
-                                let next = if tag.starts_with('#') {
-                                    tag
-                                } else {
-                                    format!("#{tag}")
-                                };
-                                tags.insert(next);
-                            }
-                        }
-                        properties.insert(key.to_string(), json_value);
+        if let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(yaml_frontmatter)
+            && let Some(mapping) = value.as_mapping()
+        {
+            for (key, value) in mapping {
+                if let Some(key) = key.as_str() {
+                    let json_value = serde_json::to_value(value).unwrap_or(Value::Null);
+                    if key == "aliases" || key == "alias" {
+                        aliases.extend(value_to_strings(&json_value));
                     }
+                    if key == "tags" {
+                        for tag in value_to_strings(&json_value) {
+                            let next = if tag.starts_with('#') {
+                                tag
+                            } else {
+                                format!("#{tag}")
+                            };
+                            tags.insert(next);
+                        }
+                    }
+                    properties.insert(key.to_string(), json_value);
                 }
             }
         }
