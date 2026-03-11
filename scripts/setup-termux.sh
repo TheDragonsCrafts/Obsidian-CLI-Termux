@@ -25,6 +25,6 @@ if [[ "$WITH_API" -eq 1 ]]; then
 fi
 
 echo
-echo "Dependencias base instaladas (incluyendo rustfmt para `cargo fmt`)."
+echo "Dependencias base instaladas (incluyendo rustfmt para \`cargo fmt\`)."
 echo "Siguiente paso:"
 echo "  ./scripts/build-termux.sh"
