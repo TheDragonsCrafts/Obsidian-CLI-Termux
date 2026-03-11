@@ -61,6 +61,7 @@ pub struct SessionState {
     pub active_vault_path: Option<String>,
     pub active_file: Option<String>,
     pub recents: Vec<RecentEntry>,
+    pub language: Option<String>,
 }
 
 #[derive(Debug)]
@@ -140,6 +141,14 @@ impl Workspace {
 
     pub fn set_active_vault(&mut self, vault: &VaultContext) {
         self.state.active_vault_path = Some(vault.root.to_string_lossy().to_string());
+    }
+
+    pub fn language(&self) -> &str {
+        self.state.language.as_deref().unwrap_or("es")
+    }
+
+    pub fn set_language(&mut self, language: &str) {
+        self.state.language = Some(language.to_string());
     }
 
     pub fn set_active_file(&mut self, vault: &VaultContext, rel_path: &str) {

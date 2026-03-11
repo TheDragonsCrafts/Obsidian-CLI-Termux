@@ -39,6 +39,12 @@ pub const COMMANDS: &[CommandSpec] = &[
         SupportLevel::Local,
     ),
     spec(
+        "language",
+        "General",
+        "Consulta o cambia el idioma de la CLI/TUI",
+        SupportLevel::Local,
+    ),
+    spec(
         "reload",
         "General",
         "Recarga la app de Obsidian",
@@ -70,209 +76,209 @@ pub const COMMANDS: &[CommandSpec] = &[
     ),
     spec(
         "file",
-        "Files",
+        "Archivos",
         "Información del archivo objetivo",
         SupportLevel::Local,
     ),
     spec(
         "files",
-        "Files",
+        "Archivos",
         "Lista archivos del vault",
         SupportLevel::Local,
     ),
     spec(
         "folder",
-        "Files",
+        "Archivos",
         "Información de una carpeta",
         SupportLevel::Local,
     ),
     spec(
         "folders",
-        "Files",
+        "Archivos",
         "Lista carpetas del vault",
         SupportLevel::Local,
     ),
     spec(
         "open",
-        "Files",
+        "Archivos",
         "Marca o abre un archivo como activo",
         SupportLevel::Local,
     ),
-    spec("create", "Files", "Crea un archivo", SupportLevel::Local),
-    spec("read", "Files", "Lee un archivo", SupportLevel::Local),
+    spec("create", "Archivos", "Crea un archivo", SupportLevel::Local),
+    spec("read", "Archivos", "Lee un archivo", SupportLevel::Local),
     spec(
         "append",
-        "Files",
+        "Archivos",
         "Agrega contenido al final",
         SupportLevel::Local,
     ),
     spec(
         "prepend",
-        "Files",
+        "Archivos",
         "Agrega contenido al inicio útil del archivo",
         SupportLevel::Local,
     ),
     spec(
         "move",
-        "Files",
+        "Archivos",
         "Mueve o renombra un archivo",
         SupportLevel::Local,
     ),
     spec(
         "rename",
-        "Files",
+        "Archivos",
         "Renombra un archivo",
         SupportLevel::Local,
     ),
     spec(
         "delete",
-        "Files",
+        "Archivos",
         "Elimina o manda a trash un archivo",
         SupportLevel::Local,
     ),
     spec(
         "links",
-        "Links",
+        "Enlaces",
         "Lista links salientes del archivo",
         SupportLevel::Local,
     ),
     spec(
         "backlinks",
-        "Links",
+        "Enlaces",
         "Lista backlinks del archivo",
         SupportLevel::Local,
     ),
     spec(
         "unresolved",
-        "Links",
+        "Enlaces",
         "Lista links no resueltos",
         SupportLevel::Local,
     ),
     spec(
         "orphans",
-        "Links",
+        "Enlaces",
         "Lista notas sin backlinks",
         SupportLevel::Local,
     ),
     spec(
         "deadends",
-        "Links",
+        "Enlaces",
         "Lista notas sin links salientes",
         SupportLevel::Local,
     ),
     spec(
         "outline",
-        "Links",
+        "Enlaces",
         "Muestra headings del archivo",
         SupportLevel::Local,
     ),
     spec(
         "daily",
-        "Daily",
+        "Diario",
         "Abre o crea la daily note de hoy",
         SupportLevel::Local,
     ),
     spec(
         "daily:path",
-        "Daily",
+        "Diario",
         "Devuelve el path esperado de la daily note",
         SupportLevel::Local,
     ),
     spec(
         "daily:read",
-        "Daily",
+        "Diario",
         "Lee la daily note de hoy",
         SupportLevel::Local,
     ),
     spec(
         "daily:append",
-        "Daily",
+        "Diario",
         "Agrega contenido a la daily note",
         SupportLevel::Local,
     ),
     spec(
         "daily:prepend",
-        "Daily",
+        "Diario",
         "Prepend a la daily note",
         SupportLevel::Local,
     ),
     spec(
         "search",
-        "Search",
+        "Búsqueda",
         "Busca texto dentro del vault",
         SupportLevel::Local,
     ),
     spec(
         "search:context",
-        "Search",
+        "Búsqueda",
         "Busca texto y devuelve contexto tipo grep",
         SupportLevel::Local,
     ),
     spec(
         "search:open",
-        "Search",
+        "Búsqueda",
         "Abre la vista Search en la app",
         SupportLevel::BridgeOnly,
     ),
     spec(
         "tags",
-        "Metadata",
+        "Metadatos",
         "Lista tags del vault o archivo",
         SupportLevel::Local,
     ),
     spec(
         "tag",
-        "Metadata",
+        "Metadatos",
         "Información de un tag",
         SupportLevel::Local,
     ),
-    spec("tasks", "Metadata", "Lista tareas", SupportLevel::Local),
+    spec("tasks", "Metadatos", "Lista tareas", SupportLevel::Local),
     spec(
         "task",
-        "Metadata",
+        "Metadatos",
         "Muestra o actualiza una tarea",
         SupportLevel::Local,
     ),
-    spec("aliases", "Metadata", "Lista aliases", SupportLevel::Local),
+    spec("aliases", "Metadatos", "Lista aliases", SupportLevel::Local),
     spec(
         "properties",
-        "Metadata",
+        "Metadatos",
         "Lista propiedades",
         SupportLevel::Local,
     ),
     spec(
         "property:set",
-        "Metadata",
+        "Metadatos",
         "Establece una propiedad",
         SupportLevel::Local,
     ),
     spec(
         "property:remove",
-        "Metadata",
+        "Metadatos",
         "Elimina una propiedad",
         SupportLevel::Local,
     ),
     spec(
         "property:read",
-        "Metadata",
+        "Metadatos",
         "Lee una propiedad",
         SupportLevel::Local,
     ),
     spec(
         "templates",
-        "Templates",
+        "Plantillas",
         "Lista templates",
         SupportLevel::Local,
     ),
     spec(
         "template:read",
-        "Templates",
+        "Plantillas",
         "Lee un template",
         SupportLevel::Local,
     ),
     spec(
         "template:insert",
-        "Templates",
+        "Plantillas",
         "Inserta un template en el archivo activo",
         SupportLevel::Local,
     ),
@@ -368,103 +374,103 @@ pub const COMMANDS: &[CommandSpec] = &[
     ),
     spec(
         "themes",
-        "Appearance",
+        "Apariencia",
         "Lista temas instalados",
         SupportLevel::Hybrid,
     ),
     spec(
         "theme",
-        "Appearance",
+        "Apariencia",
         "Información del tema activo o uno concreto",
         SupportLevel::Hybrid,
     ),
     spec(
         "theme:set",
-        "Appearance",
+        "Apariencia",
         "Activa un tema",
         SupportLevel::Hybrid,
     ),
     spec(
         "theme:install",
-        "Appearance",
+        "Apariencia",
         "Instala un tema",
         SupportLevel::BridgeOnly,
     ),
     spec(
         "theme:uninstall",
-        "Appearance",
+        "Apariencia",
         "Desinstala un tema",
         SupportLevel::Hybrid,
     ),
     spec(
         "snippets",
-        "Appearance",
+        "Apariencia",
         "Lista snippets",
         SupportLevel::Hybrid,
     ),
     spec(
         "snippets:enabled",
-        "Appearance",
+        "Apariencia",
         "Lista snippets habilitados",
         SupportLevel::Hybrid,
     ),
     spec(
         "snippet:enable",
-        "Appearance",
+        "Apariencia",
         "Habilita un snippet",
         SupportLevel::Hybrid,
     ),
     spec(
         "snippet:disable",
-        "Appearance",
+        "Apariencia",
         "Deshabilita un snippet",
         SupportLevel::Hybrid,
     ),
     spec(
         "random",
-        "Utilities",
+        "Utilidades",
         "Selecciona una nota aleatoria",
         SupportLevel::Local,
     ),
     spec(
         "random:read",
-        "Utilities",
+        "Utilidades",
         "Lee una nota aleatoria",
         SupportLevel::Local,
     ),
     spec(
         "diff",
-        "History",
+        "Historial",
         "Compara versiones",
         SupportLevel::BridgeOnly,
     ),
     spec(
         "history",
-        "History",
+        "Historial",
         "Lista versiones de file recovery",
         SupportLevel::BridgeOnly,
     ),
     spec(
         "history:list",
-        "History",
+        "Historial",
         "Lista versiones de file recovery",
         SupportLevel::BridgeOnly,
     ),
     spec(
         "history:read",
-        "History",
+        "Historial",
         "Lee una versión de file recovery",
         SupportLevel::BridgeOnly,
     ),
     spec(
         "history:restore",
-        "History",
+        "Historial",
         "Restaura una versión de file recovery",
         SupportLevel::BridgeOnly,
     ),
     spec(
         "history:open",
-        "History",
+        "Historial",
         "Abre una versión histórica",
         SupportLevel::BridgeOnly,
     ),
@@ -548,61 +554,61 @@ pub const COMMANDS: &[CommandSpec] = &[
     ),
     spec(
         "workspace",
-        "Workspace",
+        "Espacio de trabajo",
         "Árbol del layout actual",
         SupportLevel::BridgeOnly,
     ),
     spec(
         "workspaces",
-        "Workspace",
+        "Espacio de trabajo",
         "Lista workspaces guardados",
         SupportLevel::BridgeOnly,
     ),
     spec(
         "workspace:save",
-        "Workspace",
+        "Espacio de trabajo",
         "Guarda un workspace",
         SupportLevel::BridgeOnly,
     ),
     spec(
         "workspace:load",
-        "Workspace",
+        "Espacio de trabajo",
         "Carga un workspace",
         SupportLevel::BridgeOnly,
     ),
     spec(
         "workspace:delete",
-        "Workspace",
+        "Espacio de trabajo",
         "Elimina un workspace",
         SupportLevel::BridgeOnly,
     ),
     spec(
         "tabs",
-        "Workspace",
+        "Espacio de trabajo",
         "Lista tabs abiertos",
         SupportLevel::BridgeOnly,
     ),
     spec(
         "tab:open",
-        "Workspace",
+        "Espacio de trabajo",
         "Abre una tab",
         SupportLevel::BridgeOnly,
     ),
     spec(
         "recents",
-        "Workspace",
+        "Espacio de trabajo",
         "Lista recientes registrados por la CLI",
         SupportLevel::Local,
     ),
     spec(
         "web",
-        "Workspace",
+        "Espacio de trabajo",
         "Abre una URL en el viewer",
         SupportLevel::Hybrid,
     ),
     spec(
         "wordcount",
-        "Utilities",
+        "Utilidades",
         "Cuenta palabras y caracteres",
         SupportLevel::Local,
     ),
@@ -672,21 +678,29 @@ pub fn find(name: &str) -> Option<&'static CommandSpec> {
     COMMANDS.iter().find(|spec| spec.name == name)
 }
 
-pub fn overview() -> String {
+pub fn overview(language: &str) -> String {
     let mut grouped: BTreeMap<&str, Vec<&CommandSpec>> = BTreeMap::new();
     for spec in COMMANDS {
         grouped.entry(spec.category).or_default().push(spec);
     }
 
     let mut out = String::new();
-    out.push_str("Obsidian CLI for Termux (Rust)\n");
-    out.push_str(
-        "Compatibilidad de sintaxis: `vault=<name>` + comando + `param=value` + flags booleanos.\n",
-    );
-    out.push_str("Soporte: [local] funciona sin app, [hybrid] mezcla archivos/config y futuro bridge, [bridge] requiere plugin/bridge en Obsidian.\n\n");
+    if language == "en" {
+        out.push_str("Obsidian CLI for Termux (Rust)\n");
+        out.push_str(
+            "Syntax compatibility: `vault=<name>` + command + `param=value` + boolean flags.\n",
+        );
+        out.push_str("Support: [local] works without app, [hybrid] mixes files/config and future bridge, [bridge] requires an Obsidian plugin/bridge.\n\n");
+    } else {
+        out.push_str("Obsidian CLI para Termux (Rust)\n");
+        out.push_str(
+            "Compatibilidad de sintaxis: `vault=<name>` + comando + `param=value` + flags booleanos.\n",
+        );
+        out.push_str("Soporte: [local] funciona sin app, [hybrid] mezcla archivos/config y futuro bridge, [bridge] requiere plugin/bridge en Obsidian.\n\n");
+    }
 
     for (category, specs) in grouped {
-        out.push_str(category);
+        out.push_str(&localize_category(category, language));
         out.push('\n');
         for spec in specs {
             out.push_str("  ");
@@ -703,14 +717,57 @@ pub fn overview() -> String {
     out.trim_end().to_string()
 }
 
-pub fn command_help(name: &str) -> Option<String> {
+pub fn command_help(name: &str, language: &str) -> Option<String> {
     let spec = find(name)?;
     Some(format!(
-        "{name}\ncategory: {}\nsupport: [{}]\nsummary: {}",
-        spec.category,
+        "{name}\n{}: {}\n{}: [{}]\n{}: {}",
+        if language == "en" {
+            "category"
+        } else {
+            "categoría"
+        },
+        localize_category(spec.category, language),
+        if language == "en" {
+            "support"
+        } else {
+            "soporte"
+        },
         spec.support.label(),
+        if language == "en" {
+            "summary"
+        } else {
+            "resumen"
+        },
         spec.summary
     ))
+}
+
+fn localize_category(category: &str, language: &str) -> String {
+    if language != "en" {
+        return category.to_string();
+    }
+    match category {
+        "General" => "General",
+        "Vault" => "Vault",
+        "Archivos" => "Files",
+        "Enlaces" => "Links",
+        "Diario" => "Daily",
+        "Búsqueda" => "Search",
+        "Metadatos" => "Metadata",
+        "Plantillas" => "Templates",
+        "Bases" => "Bases",
+        "Bookmarks" => "Bookmarks",
+        "Plugins" => "Plugins",
+        "Apariencia" => "Appearance",
+        "Utilidades" => "Utilities",
+        "Historial" => "History",
+        "Sync" => "Sync",
+        "Publish" => "Publish",
+        "Espacio de trabajo" => "Workspace",
+        "Developer" => "Developer",
+        _ => category,
+    }
+    .to_string()
 }
 
 const fn spec(
@@ -753,15 +810,15 @@ mod tests {
 
     #[test]
     fn test_overview_structure() {
-        let out = overview();
+        let out = overview("es");
 
         // Assert header is present
-        assert!(out.contains("Obsidian CLI for Termux (Rust)"));
+        assert!(out.contains("Obsidian CLI para Termux (Rust)"));
         assert!(out.contains("Compatibilidad de sintaxis"));
 
         // Assert some categories are present
         assert!(out.contains("\nGeneral\n"));
-        assert!(out.contains("\nFiles\n"));
+        assert!(out.contains("\nArchivos\n"));
 
         // Assert some specific commands are present
         assert!(out.contains("  help [local] "));
@@ -770,15 +827,15 @@ mod tests {
 
     #[test]
     fn test_command_help_existing() {
-        let help = command_help("help").expect("Should return help for 'help'");
+        let help = command_help("help", "es").expect("Should return help for 'help'");
         assert!(help.contains("help\n"));
-        assert!(help.contains("category: General\n"));
-        assert!(help.contains("support: [local]\n"));
-        assert!(help.contains("summary: Muestra ayuda general o de un comando"));
+        assert!(help.contains("categoría: General\n"));
+        assert!(help.contains("soporte: [local]\n"));
+        assert!(help.contains("resumen: Muestra ayuda general o de un comando"));
     }
 
     #[test]
     fn test_command_help_non_existing() {
-        assert!(command_help("unknown_command_123").is_none());
+        assert!(command_help("unknown_command_123", "es").is_none());
     }
 }
