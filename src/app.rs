@@ -1735,7 +1735,12 @@ impl App {
             .workspace
             .open_vault(invocation.global.vault.as_deref())?;
         let name = required_param(invocation, "name")?;
-        if name.is_empty() || name.contains('/') || name.contains('\\') || name == ".." || name == "." {
+        if name.is_empty()
+            || name.contains('/')
+            || name.contains('\\')
+            || name == ".."
+            || name == "."
+        {
             bail!("invalid theme name");
         }
         let theme_dir = vault.obsidian_dir.join("themes").join(name);
