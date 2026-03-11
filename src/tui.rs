@@ -78,11 +78,19 @@ fn run_loop(
             }
             Event::Mouse(mouse) => match mouse.kind {
                 MouseEventKind::ScrollDown => match state.focus {
+                    FocusArea::Commands => {
+                        let len = commands.len();
+                        state.scroll_commands(2, len)
+                    }
                     FocusArea::Output => state.scroll_output(3),
                     FocusArea::Runs => state.scroll_runs(2),
                     _ => {}
                 },
                 MouseEventKind::ScrollUp => match state.focus {
+                    FocusArea::Commands => {
+                        let len = commands.len();
+                        state.scroll_commands(-2, len)
+                    }
                     FocusArea::Output => state.scroll_output(-3),
                     FocusArea::Runs => state.scroll_runs(-2),
                     _ => {}
@@ -101,6 +109,7 @@ struct DashboardState {
     input: String,
     cursor: usize,
     selected_command: usize,
+    commands_scroll: u16,
     output_scroll: u16,
     history: Vec<String>,
     history_index: Option<usize>,
@@ -151,6 +160,7 @@ impl DashboardState {
             input: String::new(),
             cursor: 0,
             selected_command: 0,
+            commands_scroll: 0,
             output_scroll: 0,
             history,
             history_index: None,
@@ -196,21 +206,45 @@ impl DashboardState {
     fn clamp_selection(&mut self, len: usize) {
         if len == 0 {
             self.selected_command = 0;
+            self.commands_scroll = 0;
             return;
         }
         if self.selected_command >= len {
             self.selected_command = len.saturating_sub(1);
         }
+        let max_scroll = len.saturating_sub(1) as u16;
+        self.commands_scroll = self.commands_scroll.min(max_scroll);
     }
 
     fn move_selection(&mut self, delta: isize, len: usize) {
         if len == 0 {
             self.selected_command = 0;
+            self.commands_scroll = 0;
             return;
         }
         let current = self.selected_command as isize;
         let next = (current + delta).clamp(0, len.saturating_sub(1) as isize);
         self.selected_command = next as usize;
+
+        if delta > 0 && self.selected_command as u16 > self.commands_scroll {
+            self.commands_scroll = self.selected_command as u16;
+        } else if delta < 0 && (self.selected_command as u16) < self.commands_scroll {
+            self.commands_scroll = self.selected_command as u16;
+        }
+    }
+
+    fn scroll_commands(&mut self, delta: i16, len: usize) {
+        if len == 0 {
+            self.selected_command = 0;
+            self.commands_scroll = 0;
+            return;
+        }
+
+        let max_index = len.saturating_sub(1) as i32;
+        let step = i32::from(delta);
+        let next = (self.selected_command as i32 + step).clamp(0, max_index) as usize;
+        self.selected_command = next;
+        self.commands_scroll = next as u16;
     }
 
     fn current_token(&self) -> &str {
@@ -571,6 +605,7 @@ fn draw_command_browser(
     if !commands.is_empty() {
         list_state.select(Some(state.selected_command));
     }
+    *list_state.offset_mut() = state.commands_scroll as usize;
 
     let list = List::new(items)
         .block(panel_block(
