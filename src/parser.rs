@@ -100,7 +100,7 @@ pub fn parse(args: &[String]) -> Result<Request> {
 }
 
 pub fn parse_line(line: &str) -> Result<Request> {
-    let parts = shlex::split(line).unwrap_or_default();
+    let parts = shlex::split(line).ok_or_else(|| anyhow::anyhow!("línea inválida: comillas desbalanceadas"))?;
     parse(&parts)
 }
 
@@ -198,9 +198,8 @@ mod tests {
 
     #[test]
     fn parse_line_unbalanced_quotes() {
-        // shlex::split will return None for this, leading to unwrap_or_default() returning an empty vec.
-        // Thus parse will return Request::Interactive.
-        assert!(matches!(parse_line("vault=\"Main").unwrap(), Request::Interactive));
+        let err = parse_line("vault=\"Main").unwrap_err();
+        assert_eq!(err.to_string(), "línea inválida: comillas desbalanceadas");
     }
 
     #[test]
