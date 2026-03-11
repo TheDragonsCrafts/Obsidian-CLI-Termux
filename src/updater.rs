@@ -33,11 +33,21 @@ pub fn check_and_auto_update() -> Result<()> {
         return Ok(());
     }
 
-    let repo = std::env::var("OBSIDIAN_CLI_GITHUB_REPO")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| DEFAULT_GITHUB_REPO.to_string());
-    let latest = fetch_latest_version(&repo)?;
+    let repo = configured_repo();
+    let latest = match fetch_latest_version(&repo) {
+        Ok(latest) => latest,
+        Err(_error) if repo != DEFAULT_GITHUB_REPO => {
+            eprintln!(
+                "No se pudo consultar releases en {repo}. Reintentando con repo por defecto {DEFAULT_GITHUB_REPO}..."
+            );
+            fetch_latest_version(DEFAULT_GITHUB_REPO).with_context(|| {
+                format!(
+                    "falló la consulta del repo configurado ({repo}) y también del repo por defecto"
+                )
+            })?
+        }
+        Err(error) => return Err(error),
+    };
     let Some(latest) = latest else {
         write_state(None)?;
         eprintln!(
@@ -59,6 +69,14 @@ pub fn check_and_auto_update() -> Result<()> {
     eprintln!("Auto-update completado. Reinicia el comando para usar la versión nueva.");
 
     Ok(())
+}
+
+fn configured_repo() -> String {
+    std::env::var("OBSIDIAN_CLI_GITHUB_REPO")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| DEFAULT_GITHUB_REPO.to_string())
 }
 
 fn should_check_now() -> Result<bool> {
@@ -174,4 +192,32 @@ fn now_unix() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or(Duration::from_secs(0))
         .as_secs()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DEFAULT_GITHUB_REPO, configured_repo};
+
+    #[test]
+    fn uses_default_repo_when_env_is_missing() {
+        unsafe { std::env::remove_var("OBSIDIAN_CLI_GITHUB_REPO") };
+        assert_eq!(configured_repo(), DEFAULT_GITHUB_REPO);
+    }
+
+    #[test]
+    fn uses_default_repo_when_env_is_blank() {
+        unsafe { std::env::set_var("OBSIDIAN_CLI_GITHUB_REPO", "   ") };
+        assert_eq!(configured_repo(), DEFAULT_GITHUB_REPO);
+    }
+
+    #[test]
+    fn uses_env_repo_when_present() {
+        unsafe {
+            std::env::set_var(
+                "OBSIDIAN_CLI_GITHUB_REPO",
+                "TheDragonsCrafts/Obsidian-CLI-Termux",
+            )
+        };
+        assert_eq!(configured_repo(), "TheDragonsCrafts/Obsidian-CLI-Termux");
+    }
 }
