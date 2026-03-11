@@ -742,7 +742,7 @@ pub fn command_help(name: &str, language: &str) -> Option<String> {
     ))
 }
 
-fn localize_category(category: &str, language: &str) -> String {
+pub fn localize_category(category: &str, language: &str) -> String {
     if language != "en" {
         return category.to_string();
     }

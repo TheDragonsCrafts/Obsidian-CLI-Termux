@@ -19,7 +19,7 @@ use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, ListState, Pa
 
 use crate::app::App;
 use crate::parser::{Request, parse_line};
-use crate::registry::{COMMANDS, CommandSpec, SupportLevel};
+use crate::registry::{COMMANDS, CommandSpec, SupportLevel, localize_category};
 
 const POLL_INTERVAL_MS: u64 = 120;
 const MAX_RUNS: usize = 24;
@@ -199,12 +199,16 @@ impl DashboardState {
         self.history_index = None;
     }
 
-    fn last_output(&self) -> (&str, bool, &str) {
+    fn last_output(&self, language: &str) -> (&str, bool, &str) {
         if let Some(record) = self.runs.first() {
             (&record.output, record.ok, &record.command)
         } else {
             (
-                "Aún no se ha ejecutado ningún comando.\n\nUsa el panel izquierdo para explorar comandos o escribe directamente en la barra de comandos.",
+                if language == "en" {
+                    "No commands executed yet.\n\nUse the left panel to browse commands or type directly in the command bar."
+                } else {
+                    "Aún no se ha ejecutado ningún comando.\n\nUsa el panel izquierdo para explorar comandos o escribe directamente en la barra de comandos."
+                },
                 true,
                 "idle",
             )
@@ -367,12 +371,13 @@ fn draw_header(frame: &mut Frame<'_>, app: &App, state: &DashboardState, area: R
         .ok()
         .map(|vault| vault.name)
         .unwrap_or_else(|| "no-vault".to_string());
-    let active_file = app
-        .workspace
-        .state
-        .active_file
-        .clone()
-        .unwrap_or_else(|| "ninguno".to_string());
+    let active_file = app.workspace.state.active_file.clone().unwrap_or_else(|| {
+        if app.workspace.language() == "en" {
+            "none".to_string()
+        } else {
+            "ninguno".to_string()
+        }
+    });
 
     let title = Line::from(vec![
         Span::styled(
@@ -477,7 +482,11 @@ fn draw_command_browser(
                     ),
                 ]),
                 Line::from(Span::styled(
-                    format!("{} / {}", spec.category, spec.summary),
+                    format!(
+                        "{} / {}",
+                        localize_category(spec.category, app.workspace.language()),
+                        spec.summary
+                    ),
                     Style::default().fg(color_muted()),
                 )),
             ])
@@ -509,7 +518,7 @@ fn draw_command_browser(
 }
 
 fn draw_output(frame: &mut Frame<'_>, app: &App, state: &DashboardState, area: Rect) {
-    let (output, ok, command) = state.last_output();
+    let (output, ok, command) = state.last_output(app.workspace.language());
     let title = if ok {
         if app.workspace.language() == "en" {
             format!("Last Output  [{}]", command)
@@ -537,7 +546,11 @@ fn draw_output(frame: &mut Frame<'_>, app: &App, state: &DashboardState, area: R
 fn draw_runs(frame: &mut Frame<'_>, app: &App, state: &DashboardState, area: Rect) {
     let items = if state.runs.is_empty() {
         vec![ListItem::new(Line::from(Span::styled(
-            "Aún no hay ejecuciones.",
+            if app.workspace.language() == "en" {
+                "No runs yet."
+            } else {
+                "Aún no hay ejecuciones."
+            },
             Style::default().fg(color_muted()),
         )))]
     } else {
@@ -774,7 +787,11 @@ fn submit_or_fill(app: &mut App, state: &mut DashboardState) -> Result<()> {
     match execution {
         Ok(output) => {
             let rendered = if output.trim().is_empty() {
-                "(sin salida)".to_string()
+                if app.workspace.language() == "en" {
+                    "(no output)".to_string()
+                } else {
+                    "(sin salida)".to_string()
+                }
             } else {
                 output
             };
