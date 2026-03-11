@@ -2,7 +2,7 @@ use std::fs;
 use std::io::{self, Stdout};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use chrono::Local;
@@ -24,7 +24,7 @@ use crate::parser::{Request, parse_line};
 use crate::registry::{COMMANDS, CommandSpec, SupportLevel, localize_category};
 use crate::updater;
 
-const POLL_INTERVAL_MS: u64 = 120;
+const POLL_INTERVAL_MS: u64 = 70;
 const MAX_RUNS: usize = 24;
 const COMMON_TOKENS: &[&str] = &[
     "vault=",
@@ -77,8 +77,16 @@ fn run_loop(
                 }
             }
             Event::Mouse(mouse) => match mouse.kind {
-                MouseEventKind::ScrollDown => state.scroll_output(3),
-                MouseEventKind::ScrollUp => state.scroll_output(-3),
+                MouseEventKind::ScrollDown => match state.focus {
+                    FocusArea::Output => state.scroll_output(3),
+                    FocusArea::Runs => state.scroll_runs(2),
+                    _ => {}
+                },
+                MouseEventKind::ScrollUp => match state.focus {
+                    FocusArea::Output => state.scroll_output(-3),
+                    FocusArea::Runs => state.scroll_runs(-2),
+                    _ => {}
+                },
                 _ => {}
             },
             Event::Resize(_, _) => {}
@@ -97,13 +105,17 @@ struct DashboardState {
     history: Vec<String>,
     history_index: Option<usize>,
     runs: Vec<RunRecord>,
+    selected_run: usize,
+    runs_scroll: u16,
     status: StatusLine,
     pending: Option<PendingRun>,
+    focus: FocusArea,
 }
 
 struct PendingRun {
     command: String,
     receiver: Receiver<Result<String, String>>,
+    started_at: Instant,
 }
 
 struct RunRecord {
@@ -125,6 +137,14 @@ enum StatusLevel {
     Error,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FocusArea {
+    Commands,
+    Output,
+    Runs,
+    Input,
+}
+
 impl DashboardState {
     fn new(history: Vec<String>) -> Self {
         Self {
@@ -135,6 +155,8 @@ impl DashboardState {
             history,
             history_index: None,
             runs: Vec::new(),
+            selected_run: 0,
+            runs_scroll: 0,
             status: StatusLine {
                 level: StatusLevel::Info,
                 message:
@@ -142,6 +164,7 @@ impl DashboardState {
                         .to_string(),
             },
             pending: None,
+            focus: FocusArea::Input,
         }
     }
 
@@ -206,12 +229,14 @@ impl DashboardState {
             },
         );
         self.runs.truncate(MAX_RUNS);
+        self.selected_run = 0;
+        self.runs_scroll = 0;
         self.output_scroll = 0;
         self.history_index = None;
     }
 
     fn last_output(&self, language: &str) -> (&str, bool, &str) {
-        if let Some(record) = self.runs.first() {
+        if let Some(record) = self.runs.get(self.selected_run) {
             (&record.output, record.ok, &record.command)
         } else {
             (
@@ -246,6 +271,33 @@ impl DashboardState {
             self.output_scroll = self.output_scroll.saturating_add(delta as u16);
         }
     }
+
+    fn scroll_runs(&mut self, delta: i16) {
+        if delta.is_negative() {
+            self.runs_scroll = self.runs_scroll.saturating_sub(delta.unsigned_abs());
+        } else {
+            self.runs_scroll = self.runs_scroll.saturating_add(delta as u16);
+        }
+    }
+
+    fn move_run_selection(&mut self, delta: isize) {
+        if self.runs.is_empty() {
+            self.selected_run = 0;
+            return;
+        }
+        let max_index = self.runs.len().saturating_sub(1) as isize;
+        let next = (self.selected_run as isize + delta).clamp(0, max_index);
+        self.selected_run = next as usize;
+    }
+
+    fn cycle_focus(&mut self) {
+        self.focus = match self.focus {
+            FocusArea::Commands => FocusArea::Output,
+            FocusArea::Output => FocusArea::Runs,
+            FocusArea::Runs => FocusArea::Input,
+            FocusArea::Input => FocusArea::Commands,
+        };
+    }
 }
 
 fn handle_key(app: &mut App, state: &mut DashboardState, key: KeyEvent) -> Result<bool> {
@@ -256,6 +308,8 @@ fn handle_key(app: &mut App, state: &mut DashboardState, key: KeyEvent) -> Resul
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => return Ok(true),
         KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             state.runs.clear();
+            state.selected_run = 0;
+            state.runs_scroll = 0;
             state.set_status(
                 StatusLevel::Info,
                 if app.workspace.language() == "en" {
@@ -268,22 +322,37 @@ fn handle_key(app: &mut App, state: &mut DashboardState, key: KeyEvent) -> Resul
         KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             state.clear_input();
         }
-        KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            history_prev(state);
-        }
-        KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            history_next(state);
-        }
-        KeyCode::PageDown => state.scroll_output(10),
-        KeyCode::PageUp => state.scroll_output(-10),
-        KeyCode::Up => {
-            let commands = state.filtered_commands();
-            state.move_selection(-1, commands.len());
-        }
-        KeyCode::Down => {
-            let commands = state.filtered_commands();
-            state.move_selection(1, commands.len());
-        }
+        KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => history_prev(state),
+        KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => history_next(state),
+        KeyCode::PageDown => match state.focus {
+            FocusArea::Output => state.scroll_output(10),
+            FocusArea::Runs => state.scroll_runs(8),
+            _ => state.scroll_output(10),
+        },
+        KeyCode::PageUp => match state.focus {
+            FocusArea::Output => state.scroll_output(-10),
+            FocusArea::Runs => state.scroll_runs(-8),
+            _ => state.scroll_output(-10),
+        },
+        KeyCode::BackTab => state.cycle_focus(),
+        KeyCode::Up => match state.focus {
+            FocusArea::Commands => {
+                let commands = state.filtered_commands();
+                state.move_selection(-1, commands.len());
+            }
+            FocusArea::Output => state.scroll_output(-2),
+            FocusArea::Runs => state.move_run_selection(-1),
+            FocusArea::Input => history_prev(state),
+        },
+        KeyCode::Down => match state.focus {
+            FocusArea::Commands => {
+                let commands = state.filtered_commands();
+                state.move_selection(1, commands.len());
+            }
+            FocusArea::Output => state.scroll_output(2),
+            FocusArea::Runs => state.move_run_selection(1),
+            FocusArea::Input => history_next(state),
+        },
         KeyCode::Left => move_cursor_left(state),
         KeyCode::Right => move_cursor_right(state),
         KeyCode::Home => state.cursor = 0,
@@ -312,7 +381,13 @@ fn handle_key(app: &mut App, state: &mut DashboardState, key: KeyEvent) -> Resul
                 );
             }
         }
-        KeyCode::Tab => insert_selected_suggestion(app, state),
+        KeyCode::Tab => {
+            if state.focus == FocusArea::Input || state.focus == FocusArea::Commands {
+                insert_selected_suggestion(app, state)
+            } else {
+                state.cycle_focus();
+            }
+        }
         KeyCode::Enter => submit_or_fill(app, state)?,
         KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
             insert_char(state, ch)
@@ -338,7 +413,7 @@ fn draw(
     let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
+            Constraint::Length(4),
             Constraint::Min(12),
             Constraint::Length(6),
         ])
@@ -432,7 +507,13 @@ fn draw_header(frame: &mut Frame<'_>, app: &App, state: &DashboardState, area: R
         ),
     ]);
 
-    let widget = Paragraph::new(Text::from(vec![title, meta, status]))
+    let mut lines = vec![title, meta, status];
+    if let Some(progress) = pending_progress_line(app.workspace.language(), state.pending.as_ref())
+    {
+        lines.push(progress);
+    }
+
+    let widget = Paragraph::new(Text::from(lines))
         .block(panel_block(
             if app.workspace.language() == "en" {
                 "Session"
@@ -498,7 +579,7 @@ fn draw_command_browser(
             } else {
                 "Explorador de comandos"
             },
-            color_accent(),
+            focus_border_color(state, FocusArea::Commands, color_accent()),
         ))
         .highlight_style(
             Style::default()
@@ -528,7 +609,11 @@ fn draw_output(frame: &mut Frame<'_>, app: &App, state: &DashboardState, area: R
     let paragraph = Paragraph::new(output)
         .block(panel_block(
             &title,
-            if ok { color_local() } else { color_error() },
+            focus_border_color(
+                state,
+                FocusArea::Output,
+                if ok { color_local() } else { color_error() },
+            ),
         ))
         .style(Style::default().fg(color_text()).bg(color_surface()))
         .wrap(Wrap { trim: false })
@@ -550,7 +635,6 @@ fn draw_runs(frame: &mut Frame<'_>, app: &App, state: &DashboardState, area: Rec
         state
             .runs
             .iter()
-            .take(6)
             .map(|run| {
                 let preview = first_non_empty_line(&run.output);
                 ListItem::new(vec![
@@ -572,15 +656,29 @@ fn draw_runs(frame: &mut Frame<'_>, app: &App, state: &DashboardState, area: Rec
             .collect::<Vec<_>>()
     };
 
-    let list = List::new(items).block(panel_block(
-        if app.workspace.language() == "en" {
-            "Recent Runs"
-        } else {
-            "Ejecuciones recientes"
-        },
-        color_accent_2(),
-    ));
-    frame.render_widget(list, area);
+    let mut list_state = ListState::default();
+    if !state.runs.is_empty() {
+        list_state.select(Some(state.selected_run));
+    }
+    *list_state.offset_mut() = state.runs_scroll as usize;
+
+    let list = List::new(items)
+        .block(panel_block(
+            if app.workspace.language() == "en" {
+                "Recent Runs"
+            } else {
+                "Ejecuciones recientes"
+            },
+            focus_border_color(state, FocusArea::Runs, color_accent_2()),
+        ))
+        .highlight_style(
+            Style::default()
+                .bg(color_highlight())
+                .fg(color_text())
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("▸ ");
+    frame.render_stateful_widget(list, area, &mut list_state);
 }
 
 fn draw_input(frame: &mut Frame<'_>, app: &App, state: &DashboardState, area: Rect) {
@@ -600,7 +698,7 @@ fn draw_input(frame: &mut Frame<'_>, app: &App, state: &DashboardState, area: Re
             } else {
                 "Barra de comandos"
             },
-            color_accent(),
+            focus_border_color(state, FocusArea::Input, color_accent()),
         ))
         .style(Style::default().fg(color_text()).bg(color_surface()));
     frame.render_widget(input, sections[0]);
@@ -609,9 +707,9 @@ fn draw_input(frame: &mut Frame<'_>, app: &App, state: &DashboardState, area: Re
     let suggestions_line = if suggestions.is_empty() {
         Line::from(Span::styled(
             if app.workspace.language() == "en" {
-                "Suggestions: type a command or press Up/Down to browse."
+                "Suggestions: type a command or press Up/Down to browse. Shift+Tab changes panel focus."
             } else {
-                "Sugerencias: escribe un comando o usa Arriba/Abajo para navegar."
+                "Sugerencias: escribe un comando o usa Arriba/Abajo para navegar. Shift+Tab cambia el foco."
             },
             Style::default().fg(color_muted()),
         ))
@@ -690,27 +788,34 @@ fn draw_input(frame: &mut Frame<'_>, app: &App, state: &DashboardState, area: Re
         ),
         Span::styled(
             if app.workspace.language() == "en" {
-                " scroll  "
+                " scroll panel  "
             } else {
-                " desplazar  "
+                " desplazar panel  "
             },
             Style::default().fg(color_muted()),
         ),
         Span::styled(
-            "q",
+            "Shift+Tab",
             Style::default()
                 .fg(color_text())
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             if app.workspace.language() == "en" {
-                " quit"
+                " focus  "
             } else {
-                " salir"
+                " foco  "
             },
             Style::default().fg(color_muted()),
         ),
     ]);
+    let shortcuts = if let Some(progress) =
+        pending_progress_line(app.workspace.language(), state.pending.as_ref())
+    {
+        vec![shortcuts, progress]
+    } else {
+        vec![shortcuts]
+    };
     frame.render_widget(Paragraph::new(shortcuts), sections[2]);
 
     let cursor_col = visible_width(&state.input[..state.cursor]) as u16 + 1;
@@ -749,18 +854,6 @@ fn insert_selected_suggestion(app: &App, state: &mut DashboardState) {
 }
 
 fn submit_or_fill(app: &mut App, state: &mut DashboardState) -> Result<()> {
-    if state.pending.is_some() {
-        state.set_status(
-            StatusLevel::Info,
-            if app.workspace.language() == "en" {
-                "There is already a command running in background."
-            } else {
-                "Ya hay un comando ejecutándose en segundo plano."
-            },
-        );
-        return Ok(());
-    }
-
     if state.input.trim().is_empty() {
         let commands = state.filtered_commands();
         if let Some(command) = commands.get(state.selected_command) {
@@ -783,6 +876,17 @@ fn submit_or_fill(app: &mut App, state: &mut DashboardState) -> Result<()> {
         Ok(Request::Interactive) => Ok(String::new()),
         Ok(Request::Invocation(invocation)) => {
             if invocation.command == "update" {
+                if state.pending.is_some() {
+                    state.set_status(
+                        StatusLevel::Info,
+                        if app.workspace.language() == "en" {
+                            "Update is already running in background."
+                        } else {
+                            "La actualización ya se está ejecutando en segundo plano."
+                        },
+                    );
+                    return Ok(());
+                }
                 let force = invocation.has_flag("force");
                 let language = app.workspace.language().to_string();
                 let (sender, receiver) = mpsc::channel();
@@ -794,6 +898,7 @@ fn submit_or_fill(app: &mut App, state: &mut DashboardState) -> Result<()> {
                 state.pending = Some(PendingRun {
                     command: command.clone(),
                     receiver,
+                    started_at: Instant::now(),
                 });
                 state.set_status(
                     StatusLevel::Info,
@@ -1110,6 +1215,49 @@ fn first_non_empty_line(output: &str) -> String {
 
 fn visible_width(value: &str) -> usize {
     value.chars().count()
+}
+
+fn focus_border_color(state: &DashboardState, area: FocusArea, default: Color) -> Color {
+    if state.focus == area {
+        color_accent()
+    } else {
+        default
+    }
+}
+
+fn pending_progress_line(language: &str, pending: Option<&PendingRun>) -> Option<Line<'static>> {
+    let pending = pending?;
+    let elapsed_ms = pending.started_at.elapsed().as_millis() as usize;
+    let spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+    let spinner = spinner_frames[(elapsed_ms / 90) % spinner_frames.len()];
+    let width = 20;
+    let phase = (elapsed_ms / 55) % (width * 2);
+    let head = if phase < width {
+        phase
+    } else {
+        (width * 2) - phase - 1
+    };
+    let mut bar = String::with_capacity(width);
+    for i in 0..width {
+        if i == head || (i > 0 && i + 1 == head) {
+            bar.push('█');
+        } else {
+            bar.push('░');
+        }
+    }
+    let seconds = pending.started_at.elapsed().as_secs();
+    let label = if language == "en" {
+        format!("{spinner} update running [{bar}] {seconds}s")
+    } else {
+        format!("{spinner} update en curso [{bar}] {seconds}s")
+    };
+
+    Some(Line::from(vec![Span::styled(
+        label,
+        Style::default()
+            .fg(color_accent_2())
+            .add_modifier(Modifier::BOLD),
+    )]))
 }
 
 fn badge<'a>(label: &'a str, color: Color) -> Span<'a> {
