@@ -14,11 +14,17 @@ fi
 pkg update -y
 pkg install -y rust clang pkg-config git
 
+if command -v rustup >/dev/null 2>&1; then
+  rustup component add rustfmt
+else
+  pkg install -y rustfmt || true
+fi
+
 if [[ "$WITH_API" -eq 1 ]]; then
   pkg install -y termux-api
 fi
 
 echo
-echo "Dependencias base instaladas."
+echo "Dependencias base instaladas (incluyendo rustfmt para \`cargo fmt\`)."
 echo "Siguiente paso:"
 echo "  ./scripts/build-termux.sh"
