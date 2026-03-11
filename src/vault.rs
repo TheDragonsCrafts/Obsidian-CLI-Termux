@@ -1330,9 +1330,21 @@ mod tests {
         let time_re = Regex::new(r"Time: \d{2}:\d{2}").unwrap();
         let datetime_re = Regex::new(r"DateTime: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.+").unwrap();
 
-        assert!(date_re.is_match(&result), "Result missing or incorrect Date format: {}", result);
-        assert!(time_re.is_match(&result), "Result missing or incorrect Time format: {}", result);
-        assert!(datetime_re.is_match(&result), "Result missing or incorrect DateTime format: {}", result);
+        assert!(
+            date_re.is_match(&result),
+            "Result missing or incorrect Date format: {}",
+            result
+        );
+        assert!(
+            time_re.is_match(&result),
+            "Result missing or incorrect Time format: {}",
+            result
+        );
+        assert!(
+            datetime_re.is_match(&result),
+            "Result missing or incorrect DateTime format: {}",
+            result
+        );
     }
 
     #[test]

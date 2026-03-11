@@ -624,9 +624,10 @@ fn submit_or_fill(app: &mut App, state: &mut DashboardState) -> Result<()> {
     }
 
     let command = state.input.trim().to_string();
-    let execution = match parse_line(&command)? {
-        Request::Interactive => Ok(String::new()),
-        Request::Invocation(invocation) => app.execute(invocation),
+    let execution = match parse_line(&command) {
+        Ok(Request::Interactive) => Ok(String::new()),
+        Ok(Request::Invocation(invocation)) => app.execute(invocation),
+        Err(error) => Err(error),
     };
 
     if !command.is_empty() && state.history.last() != Some(&command) {
