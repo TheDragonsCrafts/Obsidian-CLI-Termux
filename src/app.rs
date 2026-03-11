@@ -193,10 +193,18 @@ fn render_files(values: &[FileRecord], format: Option<&str>) -> Result<String> {
             })
         })
         .collect::<Vec<_>>();
-    render_json_rows(rows, format, Some(&["path", "size", "modified_ms", "markdown"]))
+    render_json_rows(
+        rows,
+        format,
+        Some(&["path", "size", "modified_ms", "markdown"]),
+    )
 }
 
-fn render_counts(label: &str, values: &[(String, usize)], invocation: &Invocation) -> Result<String> {
+fn render_counts(
+    label: &str,
+    values: &[(String, usize)],
+    invocation: &Invocation,
+) -> Result<String> {
     if invocation.param("format") == Some("json") {
         return Ok(serde_json::to_string_pretty(
             &values
@@ -210,10 +218,21 @@ fn render_counts(label: &str, values: &[(String, usize)], invocation: &Invocatio
             .iter()
             .map(|(name, count)| vec![name.clone(), count.to_string()])
             .collect::<Vec<_>>();
-        return render_table(&[label, "count"], &rows, if invocation.param("format") == Some("csv") { b',' } else { b'\t' });
+        return render_table(
+            &[label, "count"],
+            &rows,
+            if invocation.param("format") == Some("csv") {
+                b','
+            } else {
+                b'\t'
+            },
+        );
     }
     render_strings(
-        &values.iter().map(|(name, _)| name.clone()).collect::<Vec<_>>(),
+        &values
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>(),
         invocation.param("format"),
     )
 }
@@ -222,7 +241,11 @@ fn render_path_counts(values: &[(String, usize)], invocation: &Invocation) -> Re
     render_counts("path", values, invocation)
 }
 
-fn render_json_rows(rows: Vec<Value>, format: Option<&str>, headers: Option<&[&str]>) -> Result<String> {
+fn render_json_rows(
+    rows: Vec<Value>,
+    format: Option<&str>,
+    headers: Option<&[&str]>,
+) -> Result<String> {
     match format.unwrap_or("text") {
         "json" => Ok(serde_json::to_string_pretty(&rows)?),
         "csv" => render_value_rows(headers.unwrap_or(&[]), &rows, b','),
@@ -236,10 +259,7 @@ fn render_json_rows(rows: Vec<Value>, format: Option<&str>, headers: Option<&[&s
                             headers
                                 .iter()
                                 .map(|header| {
-                                    object
-                                        .get(*header)
-                                        .map(display_value)
-                                        .unwrap_or_default()
+                                    object.get(*header).map(display_value).unwrap_or_default()
                                 })
                                 .collect::<Vec<_>>(),
                         );
@@ -263,11 +283,7 @@ fn render_value_rows(headers: &[&str], rows: &[Value], delimiter: u8) -> Result<
         .map(|value| {
             headers
                 .iter()
-                .map(|header| {
-                    value.get(*header)
-                        .map(display_value)
-                        .unwrap_or_default()
-                })
+                .map(|header| value.get(*header).map(display_value).unwrap_or_default())
                 .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
@@ -299,7 +315,11 @@ fn display_value(value: &Value) -> String {
         Value::String(value) => value.clone(),
         Value::Bool(value) => value.to_string(),
         Value::Number(value) => value.to_string(),
-        Value::Array(values) => values.iter().map(display_value).collect::<Vec<_>>().join(", "),
+        Value::Array(values) => values
+            .iter()
+            .map(display_value)
+            .collect::<Vec<_>>()
+            .join(", "),
         Value::Object(_) => serde_json::to_string(value).unwrap_or_default(),
     }
 }
@@ -322,7 +342,8 @@ fn contains_query(line: &str, query: &str, case_sensitive: bool) -> bool {
     if case_sensitive {
         line.contains(query)
     } else {
-        line.to_ascii_lowercase().contains(query)
+        line.to_ascii_lowercase()
+            .contains(&query.to_ascii_lowercase())
     }
 }
 
@@ -431,7 +452,10 @@ fn collect_snippets(vault: &VaultContext) -> Result<Vec<SnippetInfo>> {
         };
         snippets.push(SnippetInfo {
             name: stem.to_string(),
-            enabled: appearance.enabled_css_snippets.iter().any(|item| item == stem),
+            enabled: appearance
+                .enabled_css_snippets
+                .iter()
+                .any(|item| item == stem),
         });
     }
     snippets.sort_by(|left, right| left.name.cmp(&right.name));
@@ -483,7 +507,13 @@ fn open_url(url: &str) -> Result<()> {
         for arg in *prefix {
             command.arg(arg);
         }
-        if command.arg(url).stdout(Stdio::null()).stderr(Stdio::null()).spawn().is_ok() {
+        if command
+            .arg(url)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .is_ok()
+        {
             return Ok(());
         }
     }
@@ -498,7 +528,9 @@ impl App {
             .map(String::as_str)
             .or_else(|| invocation.param("command"));
         Ok(match topic {
-            Some(topic) => command_help(topic).unwrap_or_else(|| format!("sin ayuda para `{topic}`")),
+            Some(topic) => {
+                command_help(topic).unwrap_or_else(|| format!("sin ayuda para `{topic}`"))
+            }
             None => overview(),
         })
     }
@@ -511,7 +543,9 @@ impl App {
     }
 
     fn cmd_vault(&self, invocation: &Invocation) -> Result<String> {
-        let vault = self.workspace.open_vault(invocation.global.vault.as_deref())?;
+        let vault = self
+            .workspace
+            .open_vault(invocation.global.vault.as_deref())?;
         let files = vault.list_files(None, None)?;
         let folders = vault.list_folders(None)?;
         let info = json!({
@@ -540,10 +574,10 @@ impl App {
 
     fn cmd_vaults(&self, invocation: &Invocation) -> Result<String> {
         let mut vaults = self.workspace.known_vaults.clone();
-        if vaults.is_empty() {
-            if let Ok(current) = self.workspace.resolve_vault(None) {
-                vaults.push(current);
-            }
+        if vaults.is_empty()
+            && let Ok(current) = self.workspace.resolve_vault(None)
+        {
+            vaults.push(current);
         }
 
         if invocation.has_flag("total") {
@@ -617,7 +651,9 @@ impl App {
     }
 
     fn cmd_files(&self, invocation: &Invocation) -> Result<String> {
-        let vault = self.workspace.open_vault(invocation.global.vault.as_deref())?;
+        let vault = self
+            .workspace
+            .open_vault(invocation.global.vault.as_deref())?;
         let files = vault.list_files(invocation.param("folder"), invocation.param("ext"))?;
         if invocation.has_flag("total") {
             return Ok(files.len().to_string());
@@ -626,7 +662,9 @@ impl App {
     }
 
     fn cmd_folder(&self, invocation: &Invocation) -> Result<String> {
-        let vault = self.workspace.open_vault(invocation.global.vault.as_deref())?;
+        let vault = self
+            .workspace
+            .open_vault(invocation.global.vault.as_deref())?;
         let folder = invocation
             .param("path")
             .ok_or_else(|| anyhow!("`folder` requiere `path=<carpeta>`"))?;
@@ -647,7 +685,9 @@ impl App {
     }
 
     fn cmd_folders(&self, invocation: &Invocation) -> Result<String> {
-        let vault = self.workspace.open_vault(invocation.global.vault.as_deref())?;
+        let vault = self
+            .workspace
+            .open_vault(invocation.global.vault.as_deref())?;
         let folders = vault.list_folders(invocation.param("folder"))?;
         if invocation.has_flag("total") {
             return Ok(folders.len().to_string());
@@ -671,11 +711,14 @@ impl App {
     }
 
     fn cmd_create(&mut self, invocation: &Invocation) -> Result<String> {
-        let vault = self.workspace.open_vault(invocation.global.vault.as_deref())?;
+        let vault = self
+            .workspace
+            .open_vault(invocation.global.vault.as_deref())?;
         let rel = create_target_path(invocation)?;
         let mut content = invocation.param("content").unwrap_or_default().to_string();
         if let Some(template) = invocation.param("template") {
-            let template_content = self.load_template_text(&vault, template, invocation.param("name"))?;
+            let template_content =
+                self.load_template_text(&vault, template, invocation.param("name"))?;
             if content.is_empty() {
                 content = template_content;
             } else {
@@ -784,7 +827,11 @@ impl App {
         let links = index
             .resolved_links
             .get(&rel)
-            .map(|map| map.iter().map(|(path, count)| (path.clone(), *count)).collect::<Vec<_>>())
+            .map(|map| {
+                map.iter()
+                    .map(|(path, count)| (path.clone(), *count))
+                    .collect::<Vec<_>>()
+            })
             .unwrap_or_default();
         if invocation.has_flag("total") {
             return Ok(links.len().to_string());
@@ -803,7 +850,11 @@ impl App {
         let links = index
             .backlinks
             .get(&rel)
-            .map(|map| map.iter().map(|(path, count)| (path.clone(), *count)).collect::<Vec<_>>())
+            .map(|map| {
+                map.iter()
+                    .map(|(path, count)| (path.clone(), *count))
+                    .collect::<Vec<_>>()
+            })
             .unwrap_or_default();
         if invocation.has_flag("total") {
             return Ok(links.len().to_string());
@@ -909,14 +960,22 @@ impl App {
             _ => meta
                 .headings
                 .iter()
-                .map(|heading| format!("{}{}", "  ".repeat(heading.level.saturating_sub(1)), heading.text))
+                .map(|heading| {
+                    format!(
+                        "{}{}",
+                        "  ".repeat(heading.level.saturating_sub(1)),
+                        heading.text
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join("\n"),
         })
     }
 
     fn cmd_daily_path(&self, invocation: &Invocation) -> Result<String> {
-        let vault = self.workspace.open_vault(invocation.global.vault.as_deref())?;
+        let vault = self
+            .workspace
+            .open_vault(invocation.global.vault.as_deref())?;
         vault.ensure_daily_note_path()
     }
 
@@ -927,7 +986,9 @@ impl App {
     }
 
     fn cmd_daily_read(&self, invocation: &Invocation) -> Result<String> {
-        let vault = self.workspace.open_vault(invocation.global.vault.as_deref())?;
+        let vault = self
+            .workspace
+            .open_vault(invocation.global.vault.as_deref())?;
         let path = vault.ensure_daily_note_path()?;
         vault.read_text(&path)
     }
@@ -953,7 +1014,9 @@ impl App {
     }
 
     fn cmd_search(&self, invocation: &Invocation, with_context: bool) -> Result<String> {
-        let vault = self.workspace.open_vault(invocation.global.vault.as_deref())?;
+        let vault = self
+            .workspace
+            .open_vault(invocation.global.vault.as_deref())?;
         let query = required_param(invocation, "query")?;
         let limit = invocation
             .param("limit")
@@ -976,10 +1039,10 @@ impl App {
             if !file.is_markdown && !is_text_candidate(&file.rel_path) {
                 continue;
             }
-            if let Some(scope) = scope.as_deref() {
-                if !file.rel_path.starts_with(scope) {
-                    continue;
-                }
+            if let Some(scope) = scope.as_deref()
+                && !file.rel_path.starts_with(scope)
+            {
+                continue;
             }
             let Ok(text) = vault.read_text(&file.rel_path) else {
                 continue;
@@ -1008,7 +1071,11 @@ impl App {
         }
 
         if with_context {
-            render_json_rows(hits, invocation.param("format"), Some(&["path", "line", "text"]))
+            render_json_rows(
+                hits,
+                invocation.param("format"),
+                Some(&["path", "line", "text"]),
+            )
         } else if invocation.param("format") == Some("json") {
             Ok(serde_json::to_string_pretty(&hits)?)
         } else {
@@ -1022,7 +1089,10 @@ impl App {
 
     fn cmd_tags(&self, invocation: &Invocation) -> Result<String> {
         let (vault, index, active_file) = self.open_local(invocation)?;
-        if invocation.has_flag("active") || invocation.param("file").is_some() || invocation.param("path").is_some() {
+        if invocation.has_flag("active")
+            || invocation.param("file").is_some()
+            || invocation.param("path").is_some()
+        {
             let rel = vault.resolve_target(
                 &index,
                 invocation.param("file"),
@@ -1103,15 +1173,15 @@ impl App {
 
         let mut rows = Vec::new();
         for (path, meta) in &index.markdown {
-            if let Some(selected) = selected_path.as_deref() {
-                if path != selected {
-                    continue;
-                }
+            if let Some(selected) = selected_path.as_deref()
+                && path != selected
+            {
+                continue;
             }
-            if let Some(daily) = current_daily.as_deref() {
-                if path != daily {
-                    continue;
-                }
+            if let Some(daily) = current_daily.as_deref()
+                && path != daily
+            {
+                continue;
             }
             for task in &meta.tasks {
                 if !task_matches(task, invocation) {
@@ -1132,7 +1202,11 @@ impl App {
         }
 
         if invocation.has_flag("verbose") || invocation.param("format").is_some() {
-            return render_json_rows(rows, invocation.param("format"), Some(&["ref", "status", "text"]));
+            return render_json_rows(
+                rows,
+                invocation.param("format"),
+                Some(&["ref", "status", "text"]),
+            );
         }
 
         Ok(rows
@@ -1190,12 +1264,18 @@ impl App {
             return Ok(format!("{path}:{} [{status}] {}", task.line, task.text));
         }
 
-        Ok(format!("{path}:{} [{}] {}", task.line, task.status, task.text))
+        Ok(format!(
+            "{path}:{} [{}] {}",
+            task.line, task.status, task.text
+        ))
     }
 
     fn cmd_aliases(&self, invocation: &Invocation) -> Result<String> {
         let (vault, index, active_file) = self.open_local(invocation)?;
-        if invocation.has_flag("active") || invocation.param("file").is_some() || invocation.param("path").is_some() {
+        if invocation.has_flag("active")
+            || invocation.param("file").is_some()
+            || invocation.param("path").is_some()
+        {
             let rel = vault.resolve_target(
                 &index,
                 invocation.param("file"),
@@ -1206,7 +1286,11 @@ impl App {
                 .markdown
                 .get(&rel)
                 .ok_or_else(|| anyhow!("solo aplica a archivos Markdown"))?;
-            return render_json_rows(alias_rows(meta), invocation.param("format"), Some(&["value"]));
+            return render_json_rows(
+                alias_rows(meta),
+                invocation.param("format"),
+                Some(&["value"]),
+            );
         }
 
         let mut rows = Vec::new();
@@ -1223,7 +1307,10 @@ impl App {
 
     fn cmd_properties(&self, invocation: &Invocation) -> Result<String> {
         let (vault, index, active_file) = self.open_local(invocation)?;
-        if invocation.has_flag("active") || invocation.param("file").is_some() || invocation.param("path").is_some() {
+        if invocation.has_flag("active")
+            || invocation.param("file").is_some()
+            || invocation.param("path").is_some()
+        {
             let rel = vault.resolve_target(
                 &index,
                 invocation.param("file"),
@@ -1237,7 +1324,11 @@ impl App {
             if invocation.param("format") == Some("yaml") {
                 return Ok(serde_yaml::to_string(&meta.properties)?);
             }
-            return render_json_rows(property_rows(meta), invocation.param("format"), Some(&["name", "value"]));
+            return render_json_rows(
+                property_rows(meta),
+                invocation.param("format"),
+                Some(&["name", "value"]),
+            );
         }
 
         let name_filter = invocation.param("name");
@@ -1279,7 +1370,10 @@ impl App {
         let original = fs::read_to_string(&abs)?;
         let (_, body) = split_frontmatter(&original);
         let mut properties = read_frontmatter(&abs)?;
-        properties.insert(name.to_string(), typed_value(invocation.param("type"), value));
+        properties.insert(
+            name.to_string(),
+            typed_value(invocation.param("type"), value),
+        );
         write_frontmatter(&abs, &properties, body)?;
         self.workspace.set_active_file(&vault, &rel);
         Ok(rel)
@@ -1329,7 +1423,9 @@ impl App {
     }
 
     fn cmd_templates(&self, invocation: &Invocation) -> Result<String> {
-        let vault = self.workspace.open_vault(invocation.global.vault.as_deref())?;
+        let vault = self
+            .workspace
+            .open_vault(invocation.global.vault.as_deref())?;
         let templates = self.list_templates(&vault)?;
         if invocation.has_flag("total") {
             return Ok(templates.len().to_string());
@@ -1338,7 +1434,9 @@ impl App {
     }
 
     fn cmd_template_read(&self, invocation: &Invocation) -> Result<String> {
-        let vault = self.workspace.open_vault(invocation.global.vault.as_deref())?;
+        let vault = self
+            .workspace
+            .open_vault(invocation.global.vault.as_deref())?;
         let name = required_param(invocation, "name")?;
         let mut template = self.load_template_text(&vault, name, invocation.param("title"))?;
         if invocation.has_flag("resolve") {
@@ -1361,13 +1459,17 @@ impl App {
     }
 
     fn cmd_bases(&self, invocation: &Invocation) -> Result<String> {
-        let vault = self.workspace.open_vault(invocation.global.vault.as_deref())?;
+        let vault = self
+            .workspace
+            .open_vault(invocation.global.vault.as_deref())?;
         let bases = vault.list_bases()?;
         render_strings(&bases, invocation.param("format"))
     }
 
     fn cmd_random(&mut self, invocation: &Invocation, read: bool) -> Result<String> {
-        let vault = self.workspace.open_vault(invocation.global.vault.as_deref())?;
+        let vault = self
+            .workspace
+            .open_vault(invocation.global.vault.as_deref())?;
         let files = vault.list_files(invocation.param("folder"), Some("md"))?;
         let mut rng = rand::rng();
         let target = files
@@ -1400,7 +1502,11 @@ impl App {
         if invocation.has_flag("total") {
             return Ok(rows.len().to_string());
         }
-        render_json_rows(rows, invocation.param("format"), Some(&["path", "opened_at"]))
+        render_json_rows(
+            rows,
+            invocation.param("format"),
+            Some(&["path", "opened_at"]),
+        )
     }
 
     fn cmd_wordcount(&self, invocation: &Invocation) -> Result<String> {
@@ -1429,7 +1535,9 @@ impl App {
     }
 
     fn cmd_bookmarks(&self, invocation: &Invocation) -> Result<String> {
-        let vault = self.workspace.open_vault(invocation.global.vault.as_deref())?;
+        let vault = self
+            .workspace
+            .open_vault(invocation.global.vault.as_deref())?;
         let path = vault.obsidian_dir.join("bookmarks.json");
         if !path.exists() {
             return Ok(String::new());
@@ -1448,11 +1556,15 @@ impl App {
     }
 
     fn cmd_bookmark(&self, _invocation: &Invocation) -> Result<String> {
-        bail!("`bookmark` todavía no escribe `bookmarks.json`; el esquema varía entre versiones de Obsidian")
+        bail!(
+            "`bookmark` todavía no escribe `bookmarks.json`; el esquema varía entre versiones de Obsidian"
+        )
     }
 
     fn cmd_plugins(&self, invocation: &Invocation, enabled_only: bool) -> Result<String> {
-        let vault = self.workspace.open_vault(invocation.global.vault.as_deref())?;
+        let vault = self
+            .workspace
+            .open_vault(invocation.global.vault.as_deref())?;
         let mut plugins = self.collect_plugins(&vault)?;
         if let Some(filter) = invocation.param("filter") {
             plugins.retain(|plugin| plugin.kind == filter);
@@ -1486,7 +1598,9 @@ impl App {
     }
 
     fn cmd_plugin(&self, invocation: &Invocation) -> Result<String> {
-        let vault = self.workspace.open_vault(invocation.global.vault.as_deref())?;
+        let vault = self
+            .workspace
+            .open_vault(invocation.global.vault.as_deref())?;
         let id = required_param(invocation, "id")?;
         let plugin = self
             .collect_plugins(&vault)?
@@ -1506,7 +1620,9 @@ impl App {
     }
 
     fn cmd_plugin_toggle(&self, invocation: &Invocation, enabled: bool) -> Result<String> {
-        let vault = self.workspace.open_vault(invocation.global.vault.as_deref())?;
+        let vault = self
+            .workspace
+            .open_vault(invocation.global.vault.as_deref())?;
         let id = required_param(invocation, "id")?;
         let filter = invocation.param("filter").unwrap_or("community");
         let path = if filter == "core" {
@@ -1527,7 +1643,9 @@ impl App {
     }
 
     fn cmd_plugin_uninstall(&self, invocation: &Invocation) -> Result<String> {
-        let vault = self.workspace.open_vault(invocation.global.vault.as_deref())?;
+        let vault = self
+            .workspace
+            .open_vault(invocation.global.vault.as_deref())?;
         let id = required_param(invocation, "id")?;
         if id.is_empty() || id.contains('/') || id.contains('\\') || id == ".." || id == "." {
             bail!("invalid plugin id");
@@ -1544,7 +1662,9 @@ impl App {
     }
 
     fn cmd_themes(&self, invocation: &Invocation) -> Result<String> {
-        let vault = self.workspace.open_vault(invocation.global.vault.as_deref())?;
+        let vault = self
+            .workspace
+            .open_vault(invocation.global.vault.as_deref())?;
         let themes = self.collect_themes(&vault)?;
         if invocation.param("format") == Some("json") {
             return Ok(serde_json::to_string_pretty(&themes)?);
@@ -1552,7 +1672,13 @@ impl App {
         if invocation.has_flag("versions") {
             return Ok(themes
                 .iter()
-                .map(|theme| format!("{}\t{}", theme.name, theme.version.clone().unwrap_or_default()))
+                .map(|theme| {
+                    format!(
+                        "{}\t{}",
+                        theme.name,
+                        theme.version.clone().unwrap_or_default()
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join("\n"));
         }
@@ -1564,7 +1690,9 @@ impl App {
     }
 
     fn cmd_theme(&self, invocation: &Invocation) -> Result<String> {
-        let vault = self.workspace.open_vault(invocation.global.vault.as_deref())?;
+        let vault = self
+            .workspace
+            .open_vault(invocation.global.vault.as_deref())?;
         let appearance = read_appearance(&vault)?;
         if let Some(name) = invocation.param("name") {
             let theme = self
@@ -1578,14 +1706,19 @@ impl App {
             return Ok(key_value_block(&[
                 ("name", theme.name),
                 ("version", theme.version.unwrap_or_default()),
-                ("active", (appearance.css_theme.as_deref() == Some(name)).to_string()),
+                (
+                    "active",
+                    (appearance.css_theme.as_deref() == Some(name)).to_string(),
+                ),
             ]));
         }
         Ok(appearance.css_theme.unwrap_or_default())
     }
 
     fn cmd_theme_set(&self, invocation: &Invocation) -> Result<String> {
-        let vault = self.workspace.open_vault(invocation.global.vault.as_deref())?;
+        let vault = self
+            .workspace
+            .open_vault(invocation.global.vault.as_deref())?;
         let name = required_param(invocation, "name")?;
         let mut appearance = read_appearance(&vault)?;
         appearance.css_theme = if name.is_empty() {
@@ -1598,7 +1731,9 @@ impl App {
     }
 
     fn cmd_theme_uninstall(&self, invocation: &Invocation) -> Result<String> {
-        let vault = self.workspace.open_vault(invocation.global.vault.as_deref())?;
+        let vault = self
+            .workspace
+            .open_vault(invocation.global.vault.as_deref())?;
         let name = required_param(invocation, "name")?;
         if name.is_empty() || name.contains('/') || name.contains('\\') || name == ".." || name == "." {
             bail!("invalid theme name");
@@ -1616,7 +1751,9 @@ impl App {
     }
 
     fn cmd_snippets(&self, invocation: &Invocation, enabled_only: bool) -> Result<String> {
-        let vault = self.workspace.open_vault(invocation.global.vault.as_deref())?;
+        let vault = self
+            .workspace
+            .open_vault(invocation.global.vault.as_deref())?;
         let appearance = read_appearance(&vault)?;
         let mut snippets = collect_snippets(&vault)?;
         if enabled_only {
@@ -1633,11 +1770,17 @@ impl App {
     }
 
     fn cmd_snippet_toggle(&self, invocation: &Invocation, enabled: bool) -> Result<String> {
-        let vault = self.workspace.open_vault(invocation.global.vault.as_deref())?;
+        let vault = self
+            .workspace
+            .open_vault(invocation.global.vault.as_deref())?;
         let name = required_param(invocation, "name")?;
         let mut appearance = read_appearance(&vault)?;
         if enabled {
-            if !appearance.enabled_css_snippets.iter().any(|item| item == name) {
+            if !appearance
+                .enabled_css_snippets
+                .iter()
+                .any(|item| item == name)
+            {
                 appearance.enabled_css_snippets.push(name.to_string());
             }
         } else {
@@ -1653,15 +1796,22 @@ impl App {
         Ok(url.to_string())
     }
 
-    fn open_local(&self, invocation: &Invocation) -> Result<(VaultContext, VaultIndex, Option<String>)> {
-        let vault = self.workspace.open_vault(invocation.global.vault.as_deref())?;
+    fn open_local(
+        &self,
+        invocation: &Invocation,
+    ) -> Result<(VaultContext, VaultIndex, Option<String>)> {
+        let vault = self
+            .workspace
+            .open_vault(invocation.global.vault.as_deref())?;
         let index = vault.load_index()?;
         let active_file = self.workspace.active_file_for(&vault);
         Ok((vault, index, active_file))
     }
 
     fn ensure_daily_exists(&self, invocation: &Invocation) -> Result<(VaultContext, String)> {
-        let vault = self.workspace.open_vault(invocation.global.vault.as_deref())?;
+        let vault = self
+            .workspace
+            .open_vault(invocation.global.vault.as_deref())?;
         let path = vault.ensure_daily_note_path()?;
         if !vault.rel_to_abs(&path)?.exists() {
             let settings: DailySettings = vault.daily_settings()?;
@@ -1676,9 +1826,9 @@ impl App {
     }
 
     fn list_templates(&self, vault: &VaultContext) -> Result<Vec<String>> {
-        let folder = vault
-            .templates_folder()?
-            .ok_or_else(|| anyhow!("no hay carpeta de templates configurada en `.obsidian/templates.json`"))?;
+        let folder = vault.templates_folder()?.ok_or_else(|| {
+            anyhow!("no hay carpeta de templates configurada en `.obsidian/templates.json`")
+        })?;
         let mut templates = vault
             .list_files(Some(&folder), Some("md"))?
             .into_iter()
@@ -1688,7 +1838,12 @@ impl App {
         Ok(templates)
     }
 
-    fn load_template_text(&self, vault: &VaultContext, name: &str, title: Option<&str>) -> Result<String> {
+    fn load_template_text(
+        &self,
+        vault: &VaultContext,
+        name: &str,
+        title: Option<&str>,
+    ) -> Result<String> {
         let folder = vault
             .templates_folder()?
             .ok_or_else(|| anyhow!("no hay carpeta de templates configurada"))?;
@@ -1702,7 +1857,8 @@ impl App {
     }
 
     fn collect_plugins(&self, vault: &VaultContext) -> Result<Vec<PluginInfo>> {
-        let community_enabled = read_json_string_list(&vault.obsidian_dir.join("community-plugins.json"))?;
+        let community_enabled =
+            read_json_string_list(&vault.obsidian_dir.join("community-plugins.json"))?;
         let core_enabled = read_json_string_list(&vault.obsidian_dir.join("core-plugins.json"))?;
         let mut plugins = Vec::new();
 
