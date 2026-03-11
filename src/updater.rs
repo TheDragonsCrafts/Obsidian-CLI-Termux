@@ -94,22 +94,45 @@ pub fn manual_update(force: bool, language: &str) -> Result<String> {
         write_state(Some(latest.clone()))?;
         if !force && !is_newer(&latest, env!("CARGO_PKG_VERSION"))? {
             return Ok(if language == "en" {
-                format!("Already up to date ({latest})")
+                format!("CLI is already up to date ({latest}).")
             } else {
-                format!("Ya está actualizado ({latest})")
+                format!("La CLI ya está actualizada ({latest}).")
             });
         }
     } else {
         write_state(None)?;
     }
 
-    run_self_update(&repo)?;
+    let install_output = run_self_update(&repo)?;
+
+    let progress = render_update_progress(language);
+    let details = if install_output.trim().is_empty() {
+        String::new()
+    } else {
+        let snippet = install_output
+            .lines()
+            .rev()
+            .find(|line| {
+                line.contains("Finished")
+                    || line.contains("Installing")
+                    || line.contains("Replacing")
+            })
+            .unwrap_or_default();
+        if snippet.is_empty() {
+            String::new()
+        } else {
+            format!("\n\n{snippet}")
+        }
+    };
 
     Ok(if language == "en" {
-        "Manual update completed. Restart the command to use the new version.".to_string()
+        format!(
+            "{progress}\nManual update completed. Restart the command to use the new version.{details}"
+        )
     } else {
-        "Actualización manual completada. Reinicia el comando para usar la nueva versión."
-            .to_string()
+        format!(
+            "{progress}\nActualización manual completada. Reinicia el comando para usar la nueva versión.{details}"
+        )
     })
 }
 
@@ -159,7 +182,7 @@ fn fetch_latest_version(repo: &str) -> Result<Option<String>> {
     ))
 }
 
-fn run_self_update(repo: &str) -> Result<()> {
+fn run_self_update(repo: &str) -> Result<String> {
     let install_url = format!("https://github.com/{repo}.git");
     let root = std::env::var("PREFIX").unwrap_or_else(|_| {
         dirs::home_dir()
@@ -167,7 +190,7 @@ fn run_self_update(repo: &str) -> Result<()> {
             .unwrap_or_else(|| ".".to_string())
     });
 
-    let status = Command::new("cargo")
+    let output = Command::new("cargo")
         .arg("install")
         .arg("--git")
         .arg(install_url)
@@ -177,14 +200,72 @@ fn run_self_update(repo: &str) -> Result<()> {
         .arg("--force")
         .arg("--root")
         .arg(root)
-        .status()
+        .output()
         .context("falló la ejecución de `cargo install` para el auto-update")?;
 
-    if !status.success() {
-        return Err(anyhow!("`cargo install` terminó con error"));
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(anyhow!("`cargo install` terminó con error: {stderr}"));
     }
 
-    Ok(())
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    Ok(format!("{stdout}\n{stderr}").trim().to_string())
+}
+
+fn render_update_progress(language: &str) -> String {
+    let stages = [
+        (
+            12,
+            if language == "en" {
+                "Checking latest release"
+            } else {
+                "Consultando última release"
+            },
+        ),
+        (
+            38,
+            if language == "en" {
+                "Downloading source"
+            } else {
+                "Descargando fuente"
+            },
+        ),
+        (
+            72,
+            if language == "en" {
+                "Compiling"
+            } else {
+                "Compilando"
+            },
+        ),
+        (
+            100,
+            if language == "en" {
+                "Installing binary"
+            } else {
+                "Instalando binario"
+            },
+        ),
+    ];
+
+    stages
+        .iter()
+        .map(|(percent, label)| format!("{} {}", progress_bar(*percent), label))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn progress_bar(percent: u8) -> String {
+    let total = 24;
+    let filled = ((percent as usize) * total) / 100;
+    let empty = total.saturating_sub(filled);
+    format!(
+        "[{}{}] {:>3}%",
+        "█".repeat(filled),
+        "░".repeat(empty),
+        percent
+    )
 }
 
 fn is_newer(candidate: &str, current: &str) -> Result<bool> {
