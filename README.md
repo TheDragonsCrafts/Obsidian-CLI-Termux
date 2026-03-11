@@ -119,7 +119,7 @@ cp target/release/obsidian "$PREFIX/bin/obsidian"
 chmod +x "$PREFIX/bin/obsidian"
 ```
 
-La CLI intenta descubrir vaults desde `obsidian.json` y guarda su estado en:
+La CLI intenta descubrir vaults desde `obsidian.json` **y también escanea rutas típicas de Documents en Android/Termux** (por ejemplo `~/storage/shared/Documents`, `/storage/emulated/0/Documents`) para que funcione globalmente sin estar parado dentro del vault. Guarda su estado en:
 
 ```text
 $XDG_CONFIG_HOME/obsidian-termux-cli
@@ -130,6 +130,12 @@ Si quieres forzar otra ubicación de configuración de Obsidian:
 ```bash
 export OBSIDIAN_CONFIG_DIR=/ruta/a/obsidian
 ```
+Si quieres añadir una carpeta extra para auto-descubrir vaults:
+
+```bash
+export OBSIDIAN_VAULTS_DIR=/ruta/a/Documents
+```
+
 
 Notas:
 

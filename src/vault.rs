@@ -1150,13 +1150,81 @@ fn discover_known_vaults() -> Vec<KnownVault> {
             if !path_buf.join(".obsidian").exists() {
                 continue;
             }
-            known.push(KnownVault {
-                name: vault_name(&path_buf),
-                path: path_buf.to_string_lossy().to_string(),
-            });
+            push_known_vault(&mut known, &path_buf);
         }
     }
+
+    for path in discover_documents_vaults() {
+        push_known_vault(&mut known, &path);
+    }
+
     known
+}
+
+fn push_known_vault(known: &mut Vec<KnownVault>, path: &Path) {
+    let path_str = path.to_string_lossy().to_string();
+    if known.iter().any(|vault| vault.path == path_str) {
+        return;
+    }
+    known.push(KnownVault {
+        name: vault_name(path),
+        path: path_str,
+    });
+}
+
+fn discover_documents_vaults() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+
+    if let Some(documents) = dirs::document_dir() {
+        roots.push(documents);
+    }
+
+    if let Some(home) = dirs::home_dir() {
+        roots.push(home.join("Documents"));
+        roots.push(home.join("storage").join("shared").join("Documents"));
+    }
+
+    roots.push(PathBuf::from("/storage/emulated/0/Documents"));
+    roots.push(PathBuf::from("/sdcard/Documents"));
+
+    if let Ok(custom) = std::env::var("OBSIDIAN_VAULTS_DIR") {
+        roots.push(PathBuf::from(custom));
+    }
+
+    discover_vaults_under_roots(&roots)
+}
+
+fn discover_vaults_under_roots(roots: &[PathBuf]) -> Vec<PathBuf> {
+    let mut vaults = Vec::new();
+    let mut seen = BTreeSet::new();
+    for root in roots {
+        if !root.exists() {
+            continue;
+        }
+
+        for entry in WalkDir::new(root)
+            .follow_links(false)
+            .max_depth(3)
+            .into_iter()
+            .filter_map(Result::ok)
+        {
+            if !entry.file_type().is_dir() {
+                continue;
+            }
+
+            let candidate = entry.path();
+            if !candidate.join(".obsidian").is_dir() {
+                continue;
+            }
+
+            let key = candidate.to_string_lossy().to_string();
+            if seen.insert(key) {
+                vaults.push(candidate.to_path_buf());
+            }
+        }
+    }
+
+    vaults
 }
 
 fn read_cache(path: &Path) -> Result<StoredIndex> {
@@ -1285,7 +1353,10 @@ pub fn count_bytes(records: &[FileRecord]) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_template_tokens, moment_to_chrono, normalize_rel_path, parse_markdown};
+    use super::{
+        apply_template_tokens, discover_vaults_under_roots, moment_to_chrono, normalize_rel_path,
+        parse_markdown,
+    };
 
     #[test]
     fn parses_markdown_metadata() {
@@ -1354,6 +1425,28 @@ mod tests {
             "Result missing or incorrect DateTime format: {}",
             result
         );
+    }
+
+    #[test]
+    fn discovers_vaults_in_documents_like_roots() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("obsidian-cli-vault-discovery-{stamp}"));
+        let docs = root.join("Documents");
+        let vault = docs.join("WorkVault");
+        let nested = docs.join("A").join("B").join("DeepVault");
+
+        std::fs::create_dir_all(vault.join(".obsidian")).unwrap();
+        std::fs::create_dir_all(nested.join(".obsidian")).unwrap();
+
+        let found = discover_vaults_under_roots(&[docs]);
+
+        assert!(found.contains(&vault));
+        assert!(found.contains(&nested));
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
