@@ -1052,18 +1052,31 @@ fn resolve_link_target(
             let base = Path::new(path)
                 .file_stem()
                 .and_then(OsStr::to_str)
-                .unwrap_or_default()
-                .to_ascii_lowercase();
-            if base == stem
-                || path
-                    .trim_end_matches(".md")
-                    .to_ascii_lowercase()
-                    .ends_with(&normalized.to_ascii_lowercase())
-            {
-                Some((score_candidate(&source_dir, path), path.clone()))
-            } else {
-                None
+                .unwrap_or_default();
+            if base.eq_ignore_ascii_case(&stem) {
+                return Some((score_candidate(&source_dir, path), path.clone()));
             }
+
+            let path_bytes = path.as_bytes();
+            let path_no_ext = if path.ends_with(".md")
+                || path.ends_with(".MD")
+                || path.ends_with(".mD")
+                || path.ends_with(".Md")
+            {
+                &path_bytes[..path_bytes.len() - 3]
+            } else {
+                path_bytes
+            };
+
+            let norm_bytes = normalized.as_bytes();
+            if path_no_ext.len() >= norm_bytes.len() {
+                let tail = &path_no_ext[path_no_ext.len() - norm_bytes.len()..];
+                if tail.eq_ignore_ascii_case(norm_bytes) {
+                    return Some((score_candidate(&source_dir, path), path.clone()));
+                }
+            }
+
+            None
         })
         .collect::<Vec<_>>();
     candidates.sort_by(|left, right| right.0.cmp(&left.0).then(left.1.cmp(&right.1)));
@@ -1263,7 +1276,7 @@ pub fn count_bytes(records: &[FileRecord]) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{moment_to_chrono, normalize_rel_path, parse_markdown};
+    use super::{apply_template_tokens, moment_to_chrono, normalize_rel_path, parse_markdown};
 
     #[test]
     fn parses_markdown_metadata() {
@@ -1287,5 +1300,52 @@ mod tests {
     #[test]
     fn converts_moment_tokens() {
         assert_eq!(moment_to_chrono("YYYY-MM-DD"), "%Y-%m-%d");
+    }
+
+    #[test]
+    fn applies_template_tokens_with_title() {
+        let template = "Title: {{title}}";
+        let result = apply_template_tokens(template, Some("My Note Title"));
+        assert_eq!(result, "Title: My Note Title");
+    }
+
+    #[test]
+    fn applies_template_tokens_without_title() {
+        let template = "Title: {{title}}";
+        let result = apply_template_tokens(template, None);
+        assert_eq!(result, "Title: ");
+    }
+
+    #[test]
+    fn applies_template_tokens_date_time() {
+        use regex::Regex;
+
+        let template = "Date: {{date}}, Time: {{time}}, DateTime: {{datetime}}";
+        let result = apply_template_tokens(template, None);
+
+        // Ensure tests are deterministic and not flaky by using Regex to validate
+        // the format of the output, rather than relying on Local::now() which can
+        // roll over during the test execution.
+        let date_re = Regex::new(r"Date: \d{4}-\d{2}-\d{2}").unwrap();
+        let time_re = Regex::new(r"Time: \d{2}:\d{2}").unwrap();
+        let datetime_re = Regex::new(r"DateTime: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.+").unwrap();
+
+        assert!(date_re.is_match(&result), "Result missing or incorrect Date format: {}", result);
+        assert!(time_re.is_match(&result), "Result missing or incorrect Time format: {}", result);
+        assert!(datetime_re.is_match(&result), "Result missing or incorrect DateTime format: {}", result);
+    }
+
+    #[test]
+    fn applies_template_tokens_no_replacements() {
+        let template = "Just regular text with {no} {{matching}} tokens";
+        let result = apply_template_tokens(template, Some("Title"));
+        assert_eq!(result, "Just regular text with {no} {{matching}} tokens");
+    }
+
+    #[test]
+    fn applies_template_tokens_multiple_same_tokens() {
+        let template = "{{title}} - {{title}}";
+        let result = apply_template_tokens(template, Some("Double"));
+        assert_eq!(result, "Double - Double");
     }
 }
