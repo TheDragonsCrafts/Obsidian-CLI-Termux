@@ -33,18 +33,19 @@ pub fn check_and_auto_update() -> Result<()> {
         return Ok(());
     }
 
-    let repo = configured_repo();
-    let latest = match fetch_latest_version(&repo) {
-        Ok(latest) => latest,
-        Err(_error) if repo != DEFAULT_GITHUB_REPO => {
+    let configured_repo = configured_repo();
+    let (repo, latest) = match fetch_latest_version(&configured_repo) {
+        Ok(latest) => (configured_repo.clone(), latest),
+        Err(_error) if configured_repo != DEFAULT_GITHUB_REPO => {
             eprintln!(
-                "No se pudo consultar releases en {repo}. Reintentando con repo por defecto {DEFAULT_GITHUB_REPO}..."
+                "No se pudo consultar releases en {configured_repo}. Reintentando con repo por defecto {DEFAULT_GITHUB_REPO}..."
             );
-            fetch_latest_version(DEFAULT_GITHUB_REPO).with_context(|| {
+            let latest = fetch_latest_version(DEFAULT_GITHUB_REPO).with_context(|| {
                 format!(
-                    "falló la consulta del repo configurado ({repo}) y también del repo por defecto"
+                    "falló la consulta del repo configurado ({configured_repo}) y también del repo por defecto"
                 )
-            })?
+            })?;
+            (DEFAULT_GITHUB_REPO.to_string(), latest)
         }
         Err(error) => return Err(error),
     };
