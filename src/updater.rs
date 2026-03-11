@@ -216,9 +216,9 @@ mod tests {
         unsafe {
             std::env::set_var(
                 "OBSIDIAN_CLI_GITHUB_REPO",
-                "TheDragonsCrafts/Obsidian-CLI-Termux",
+                "CustomOrg/CustomRepo",
             )
         };
-        assert_eq!(configured_repo(), "TheDragonsCrafts/Obsidian-CLI-Termux");
+        assert_eq!(configured_repo(), "CustomOrg/CustomRepo");
     }
 }
