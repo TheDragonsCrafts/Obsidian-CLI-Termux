@@ -408,27 +408,9 @@ fn draw_header(frame: &mut Frame<'_>, app: &App, state: &DashboardState, area: R
     let status = Line::from(vec![
         badge(
             match state.status.level {
-                StatusLevel::Info => {
-                    if app.workspace.language() == "en" {
-                        "info"
-                    } else {
-                        "info"
-                    }
-                }
-                StatusLevel::Success => {
-                    if app.workspace.language() == "en" {
-                        "ok"
-                    } else {
-                        "ok"
-                    }
-                }
-                StatusLevel::Error => {
-                    if app.workspace.language() == "en" {
-                        "error"
-                    } else {
-                        "error"
-                    }
-                }
+                StatusLevel::Info => "info",
+                StatusLevel::Success => "ok",
+                StatusLevel::Error => "error",
             },
             status_color(state.status.level),
         ),
