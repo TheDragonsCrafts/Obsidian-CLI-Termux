@@ -1,5 +1,7 @@
 use std::fs;
 use std::io::{self, Stdout};
+use std::sync::mpsc::{self, Receiver};
+use std::thread;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -20,6 +22,7 @@ use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, ListState, Pa
 use crate::app::App;
 use crate::parser::{Request, parse_line};
 use crate::registry::{COMMANDS, CommandSpec, SupportLevel, localize_category};
+use crate::updater;
 
 const POLL_INTERVAL_MS: u64 = 120;
 const MAX_RUNS: usize = 24;
@@ -58,6 +61,7 @@ fn run_loop(
     state: &mut DashboardState,
 ) -> Result<()> {
     loop {
+        poll_pending(app, state);
         let commands = state.filtered_commands();
         state.clamp_selection(commands.len());
         terminal.draw(|frame| draw(frame, app, state, &commands))?;
@@ -94,6 +98,12 @@ struct DashboardState {
     history_index: Option<usize>,
     runs: Vec<RunRecord>,
     status: StatusLine,
+    pending: Option<PendingRun>,
+}
+
+struct PendingRun {
+    command: String,
+    receiver: Receiver<Result<String, String>>,
 }
 
 struct RunRecord {
@@ -131,6 +141,7 @@ impl DashboardState {
                     "Escribe un comando, usa Tab para insertar, Enter para ejecutar, q para salir."
                         .to_string(),
             },
+            pending: None,
         }
     }
 
@@ -738,6 +749,18 @@ fn insert_selected_suggestion(app: &App, state: &mut DashboardState) {
 }
 
 fn submit_or_fill(app: &mut App, state: &mut DashboardState) -> Result<()> {
+    if state.pending.is_some() {
+        state.set_status(
+            StatusLevel::Info,
+            if app.workspace.language() == "en" {
+                "There is already a command running in background."
+            } else {
+                "Ya hay un comando ejecutándose en segundo plano."
+            },
+        );
+        return Ok(());
+    }
+
     if state.input.trim().is_empty() {
         let commands = state.filtered_commands();
         if let Some(command) = commands.get(state.selected_command) {
@@ -756,9 +779,38 @@ fn submit_or_fill(app: &mut App, state: &mut DashboardState) -> Result<()> {
     }
 
     let command = state.input.trim().to_string();
-    let execution = match parse_line(&command) {
+    let request = match parse_line(&command) {
         Ok(Request::Interactive) => Ok(String::new()),
-        Ok(Request::Invocation(invocation)) => app.execute(invocation),
+        Ok(Request::Invocation(invocation)) => {
+            if invocation.command == "update" {
+                let force = invocation.has_flag("force");
+                let language = app.workspace.language().to_string();
+                let (sender, receiver) = mpsc::channel();
+                thread::spawn(move || {
+                    let result = updater::manual_update(force, &language)
+                        .map_err(|error| format!("{error:#}"));
+                    let _ = sender.send(result);
+                });
+                state.pending = Some(PendingRun {
+                    command: command.clone(),
+                    receiver,
+                });
+                state.set_status(
+                    StatusLevel::Info,
+                    if app.workspace.language() == "en" {
+                        "Running `update` in background."
+                    } else {
+                        "Ejecutando `update` en segundo plano."
+                    },
+                );
+                state.clear_input();
+                if !command.is_empty() && state.history.last() != Some(&command) {
+                    state.history.push(command.clone());
+                }
+                return Ok(());
+            }
+            app.execute(invocation)
+        }
         Err(error) => Err(error),
     };
 
@@ -766,7 +818,7 @@ fn submit_or_fill(app: &mut App, state: &mut DashboardState) -> Result<()> {
         state.history.push(command.clone());
     }
 
-    match execution {
+    match request {
         Ok(output) => {
             let rendered = if output.trim().is_empty() {
                 if app.workspace.language() == "en" {
@@ -804,6 +856,61 @@ fn submit_or_fill(app: &mut App, state: &mut DashboardState) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn poll_pending(app: &App, state: &mut DashboardState) {
+    let Some(pending) = state.pending.take() else {
+        return;
+    };
+
+    match pending.receiver.try_recv() {
+        Ok(result) => match result {
+            Ok(output) => {
+                let rendered = if output.trim().is_empty() {
+                    if app.workspace.language() == "en" {
+                        "(no output)".to_string()
+                    } else {
+                        "(sin salida)".to_string()
+                    }
+                } else {
+                    output
+                };
+                state.push_run(pending.command.clone(), true, rendered);
+                state.set_status(
+                    StatusLevel::Success,
+                    if app.workspace.language() == "en" {
+                        format!("Executed `{}`.", pending.command)
+                    } else {
+                        format!("Ejecutado `{}`.", pending.command)
+                    },
+                );
+            }
+            Err(message) => {
+                state.push_run(pending.command.clone(), false, message);
+                state.set_status(
+                    StatusLevel::Error,
+                    if app.workspace.language() == "en" {
+                        format!("Command failed: `{}`.", pending.command)
+                    } else {
+                        format!("El comando falló: `{}`.", pending.command)
+                    },
+                );
+            }
+        },
+        Err(mpsc::TryRecvError::Empty) => {
+            state.pending = Some(pending);
+        }
+        Err(mpsc::TryRecvError::Disconnected) => {
+            state.set_status(
+                StatusLevel::Error,
+                if app.workspace.language() == "en" {
+                    "Background update process disconnected unexpectedly."
+                } else {
+                    "El proceso de actualización en segundo plano se desconectó inesperadamente."
+                },
+            );
+        }
+    }
 }
 
 fn insert_char(state: &mut DashboardState, ch: char) {
