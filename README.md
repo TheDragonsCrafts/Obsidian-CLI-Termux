@@ -69,7 +69,9 @@ Variables útiles:
 - `OBSIDIAN_CLI_GITHUB_REPO=<owner>/<repo>` para indicar el repositorio exacto.
 - `OBSIDIAN_CLI_AUTO_UPDATE=0` para desactivar el auto-update.
 
-Por defecto se usa `Obsidian-CLI-Termux/Obsidian-CLI-Termux` si no se define `OBSIDIAN_CLI_GITHUB_REPO`.
+Por defecto se usa `TheDragonsCrafts/Obsidian-CLI-Termux` si no se define `OBSIDIAN_CLI_GITHUB_REPO`.
+
+Si el repo no tiene releases aún, el auto-update hace fallback a `cargo install --git` usando la rama por defecto del repositorio.
 
 ## Build
 
