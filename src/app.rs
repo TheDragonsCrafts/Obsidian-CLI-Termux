@@ -556,7 +556,7 @@ impl App {
             .or_else(|| invocation.positionals.first().map(String::as_str));
 
         if let Some(value) = selected {
-            let normalized = value.trim().to_ascii_lowercase();
+            let normalized = value.trim().to_lowercase();
             let language = match normalized.as_str() {
                 "es" | "espanol" | "español" | "spanish" => "es",
                 "en" | "english" | "ingles" | "inglés" => "en",
