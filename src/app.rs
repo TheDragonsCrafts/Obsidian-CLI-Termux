@@ -33,6 +33,7 @@ impl App {
         let output = match invocation.command.as_str() {
             "help" => self.cmd_help(&invocation)?,
             "version" => self.cmd_version(),
+            "language" => self.cmd_language(&invocation)?,
             "vault" => self.cmd_vault(&invocation)?,
             "vaults" => self.cmd_vaults(&invocation)?,
             "vault:open" => self.cmd_vault_open(&invocation)?,
@@ -528,18 +529,48 @@ impl App {
             .map(String::as_str)
             .or_else(|| invocation.param("command"));
         Ok(match topic {
-            Some(topic) => {
-                command_help(topic).unwrap_or_else(|| format!("sin ayuda para `{topic}`"))
-            }
-            None => overview(),
+            Some(topic) => command_help(topic, self.workspace.language())
+                .unwrap_or_else(|| format!("sin ayuda para `{topic}`")),
+            None => overview(self.workspace.language()),
         })
     }
 
     fn cmd_version(&self) -> String {
-        format!(
-            "obsidian-termux-cli {}\ncompat-profile: Obsidian CLI 1.12-style syntax",
-            env!("CARGO_PKG_VERSION")
-        )
+        if self.workspace.language() == "en" {
+            format!(
+                "obsidian-termux-cli {}\ncompat-profile: Obsidian CLI 1.12-style syntax",
+                env!("CARGO_PKG_VERSION")
+            )
+        } else {
+            format!(
+                "obsidian-termux-cli {}\nperfil-de-compatibilidad: sintaxis estilo Obsidian CLI 1.12",
+                env!("CARGO_PKG_VERSION")
+            )
+        }
+    }
+
+    fn cmd_language(&mut self, invocation: &Invocation) -> Result<String> {
+        let selected = invocation
+            .param("set")
+            .or_else(|| invocation.param("lang"))
+            .or_else(|| invocation.positionals.first().map(String::as_str));
+
+        if let Some(value) = selected {
+            let normalized = value.trim().to_lowercase();
+            let language = match normalized.as_str() {
+                "es" | "espanol" | "español" | "spanish" => "es",
+                "en" | "english" | "ingles" | "inglés" => "en",
+                _ => bail!("idioma no soportado: {value}. Usa `es` o `en`"),
+            };
+            self.workspace.set_language(language);
+        }
+
+        let language = self.workspace.language();
+        Ok(if language == "en" {
+            format!("language: {language}")
+        } else {
+            format!("idioma: {language}")
+        })
     }
 
     fn cmd_vault(&self, invocation: &Invocation) -> Result<String> {

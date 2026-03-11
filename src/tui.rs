@@ -19,7 +19,7 @@ use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, ListState, Pa
 
 use crate::app::App;
 use crate::parser::{Request, parse_line};
-use crate::registry::{COMMANDS, CommandSpec, SupportLevel};
+use crate::registry::{COMMANDS, CommandSpec, SupportLevel, localize_category};
 
 const POLL_INTERVAL_MS: u64 = 120;
 const MAX_RUNS: usize = 24;
@@ -36,6 +36,8 @@ const COMMON_TOKENS: &[&str] = &[
     "total",
     "verbose",
     "--copy",
+    "set=es",
+    "set=en",
 ];
 
 pub fn run(app: &mut App) -> Result<()> {
@@ -125,7 +127,9 @@ impl DashboardState {
             runs: Vec::new(),
             status: StatusLine {
                 level: StatusLevel::Info,
-                message: "Type a command, use Tab to insert, Enter to run, q to exit.".to_string(),
+                message:
+                    "Escribe un comando, usa Tab para insertar, Enter para ejecutar, q para salir."
+                        .to_string(),
             },
         }
     }
@@ -195,12 +199,16 @@ impl DashboardState {
         self.history_index = None;
     }
 
-    fn last_output(&self) -> (&str, bool, &str) {
+    fn last_output(&self, language: &str) -> (&str, bool, &str) {
         if let Some(record) = self.runs.first() {
             (&record.output, record.ok, &record.command)
         } else {
             (
-                "No commands executed yet.\n\nUse the left panel to browse commands or type directly in the command bar.",
+                if language == "en" {
+                    "No commands executed yet.\n\nUse the left panel to browse commands or type directly in the command bar."
+                } else {
+                    "Aún no se ha ejecutado ningún comando.\n\nUsa el panel izquierdo para explorar comandos o escribe directamente en la barra de comandos."
+                },
                 true,
                 "idle",
             )
@@ -237,7 +245,14 @@ fn handle_key(app: &mut App, state: &mut DashboardState, key: KeyEvent) -> Resul
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => return Ok(true),
         KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             state.runs.clear();
-            state.set_status(StatusLevel::Info, "Output cleared.");
+            state.set_status(
+                StatusLevel::Info,
+                if app.workspace.language() == "en" {
+                    "Output cleared."
+                } else {
+                    "Salida limpiada."
+                },
+            );
         }
         KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             state.clear_input();
@@ -266,10 +281,24 @@ fn handle_key(app: &mut App, state: &mut DashboardState, key: KeyEvent) -> Resul
         KeyCode::Delete => delete(state),
         KeyCode::Esc => {
             if state.input.is_empty() {
-                state.set_status(StatusLevel::Info, "Input already empty.");
+                state.set_status(
+                    StatusLevel::Info,
+                    if app.workspace.language() == "en" {
+                        "Input already empty."
+                    } else {
+                        "La entrada ya está vacía."
+                    },
+                );
             } else {
                 state.clear_input();
-                state.set_status(StatusLevel::Info, "Input cleared.");
+                state.set_status(
+                    StatusLevel::Info,
+                    if app.workspace.language() == "en" {
+                        "Input cleared."
+                    } else {
+                        "Entrada limpiada."
+                    },
+                );
             }
         }
         KeyCode::Tab => insert_selected_suggestion(app, state),
@@ -315,9 +344,9 @@ fn draw(
             .direction(Direction::Vertical)
             .constraints([Constraint::Min(10), Constraint::Length(9)])
             .split(main[1]);
-        draw_command_browser(frame, state, commands, main[0]);
-        draw_output(frame, state, right[0]);
-        draw_runs(frame, state, right[1]);
+        draw_command_browser(frame, app, state, commands, main[0]);
+        draw_output(frame, app, state, right[0]);
+        draw_runs(frame, app, state, right[1]);
     } else {
         let stacked = Layout::default()
             .direction(Direction::Vertical)
@@ -327,9 +356,9 @@ fn draw(
                 Constraint::Length(8),
             ])
             .split(vertical[1]);
-        draw_command_browser(frame, state, commands, stacked[0]);
-        draw_output(frame, state, stacked[1]);
-        draw_runs(frame, state, stacked[2]);
+        draw_command_browser(frame, app, state, commands, stacked[0]);
+        draw_output(frame, app, state, stacked[1]);
+        draw_runs(frame, app, state, stacked[2]);
     }
 
     draw_input(frame, app, state, vertical[2]);
@@ -342,12 +371,13 @@ fn draw_header(frame: &mut Frame<'_>, app: &App, state: &DashboardState, area: R
         .ok()
         .map(|vault| vault.name)
         .unwrap_or_else(|| "no-vault".to_string());
-    let active_file = app
-        .workspace
-        .state
-        .active_file
-        .clone()
-        .unwrap_or_else(|| "none".to_string());
+    let active_file = app.workspace.state.active_file.clone().unwrap_or_else(|| {
+        if app.workspace.language() == "en" {
+            "none".to_string()
+        } else {
+            "ninguno".to_string()
+        }
+    });
 
     let title = Line::from(vec![
         Span::styled(
@@ -392,13 +422,21 @@ fn draw_header(frame: &mut Frame<'_>, app: &App, state: &DashboardState, area: R
     ]);
 
     let widget = Paragraph::new(Text::from(vec![title, meta, status]))
-        .block(panel_block("Session", color_panel_border()))
+        .block(panel_block(
+            if app.workspace.language() == "en" {
+                "Session"
+            } else {
+                "Sesión"
+            },
+            color_panel_border(),
+        ))
         .alignment(Alignment::Left);
     frame.render_widget(widget, area);
 }
 
 fn draw_command_browser(
     frame: &mut Frame<'_>,
+    app: &App,
     state: &DashboardState,
     commands: &[&'static CommandSpec],
     area: Rect,
@@ -426,7 +464,11 @@ fn draw_command_browser(
                     ),
                 ]),
                 Line::from(Span::styled(
-                    format!("{} / {}", spec.category, spec.summary),
+                    format!(
+                        "{} / {}",
+                        localize_category(spec.category, app.workspace.language()),
+                        spec.summary
+                    ),
                     Style::default().fg(color_muted()),
                 )),
             ])
@@ -439,7 +481,14 @@ fn draw_command_browser(
     }
 
     let list = List::new(items)
-        .block(panel_block("Command Browser", color_accent()))
+        .block(panel_block(
+            if app.workspace.language() == "en" {
+                "Command Browser"
+            } else {
+                "Explorador de comandos"
+            },
+            color_accent(),
+        ))
         .highlight_style(
             Style::default()
                 .bg(color_highlight())
@@ -450,12 +499,20 @@ fn draw_command_browser(
     frame.render_stateful_widget(list, area, &mut list_state);
 }
 
-fn draw_output(frame: &mut Frame<'_>, state: &DashboardState, area: Rect) {
-    let (output, ok, command) = state.last_output();
+fn draw_output(frame: &mut Frame<'_>, app: &App, state: &DashboardState, area: Rect) {
+    let (output, ok, command) = state.last_output(app.workspace.language());
     let title = if ok {
-        format!("Last Output  [{}]", command)
+        if app.workspace.language() == "en" {
+            format!("Last Output  [{}]", command)
+        } else {
+            format!("Última salida  [{}]", command)
+        }
     } else {
-        format!("Last Error  [{}]", command)
+        if app.workspace.language() == "en" {
+            format!("Last Error  [{}]", command)
+        } else {
+            format!("Último error  [{}]", command)
+        }
     };
     let paragraph = Paragraph::new(output)
         .block(panel_block(
@@ -468,10 +525,14 @@ fn draw_output(frame: &mut Frame<'_>, state: &DashboardState, area: Rect) {
     frame.render_widget(paragraph, area);
 }
 
-fn draw_runs(frame: &mut Frame<'_>, state: &DashboardState, area: Rect) {
+fn draw_runs(frame: &mut Frame<'_>, app: &App, state: &DashboardState, area: Rect) {
     let items = if state.runs.is_empty() {
         vec![ListItem::new(Line::from(Span::styled(
-            "No runs yet.",
+            if app.workspace.language() == "en" {
+                "No runs yet."
+            } else {
+                "Aún no hay ejecuciones."
+            },
             Style::default().fg(color_muted()),
         )))]
     } else {
@@ -500,7 +561,14 @@ fn draw_runs(frame: &mut Frame<'_>, state: &DashboardState, area: Rect) {
             .collect::<Vec<_>>()
     };
 
-    let list = List::new(items).block(panel_block("Recent Runs", color_accent_2()));
+    let list = List::new(items).block(panel_block(
+        if app.workspace.language() == "en" {
+            "Recent Runs"
+        } else {
+            "Ejecuciones recientes"
+        },
+        color_accent_2(),
+    ));
     frame.render_widget(list, area);
 }
 
@@ -515,19 +583,34 @@ fn draw_input(frame: &mut Frame<'_>, app: &App, state: &DashboardState, area: Re
         .split(area);
 
     let input = Paragraph::new(state.input.as_str())
-        .block(panel_block("Command Bar", color_accent()))
+        .block(panel_block(
+            if app.workspace.language() == "en" {
+                "Command Bar"
+            } else {
+                "Barra de comandos"
+            },
+            color_accent(),
+        ))
         .style(Style::default().fg(color_text()).bg(color_surface()));
     frame.render_widget(input, sections[0]);
 
     let suggestions = suggestion_tokens(app, state, &state.filtered_commands());
     let suggestions_line = if suggestions.is_empty() {
         Line::from(Span::styled(
-            "Suggestions: type a command or press Up/Down to browse.",
+            if app.workspace.language() == "en" {
+                "Suggestions: type a command or press Up/Down to browse."
+            } else {
+                "Sugerencias: escribe un comando o usa Arriba/Abajo para navegar."
+            },
             Style::default().fg(color_muted()),
         ))
     } else {
         let mut spans = vec![Span::styled(
-            "Suggestions ",
+            if app.workspace.language() == "en" {
+                "Suggestions "
+            } else {
+                "Sugerencias "
+            },
             Style::default()
                 .fg(color_muted())
                 .add_modifier(Modifier::BOLD),
@@ -552,35 +635,70 @@ fn draw_input(frame: &mut Frame<'_>, app: &App, state: &DashboardState, area: Re
                 .fg(color_text())
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" run  ", Style::default().fg(color_muted())),
+        Span::styled(
+            if app.workspace.language() == "en" {
+                " run  "
+            } else {
+                " ejecutar  "
+            },
+            Style::default().fg(color_muted()),
+        ),
         Span::styled(
             "Tab",
             Style::default()
                 .fg(color_text())
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" insert  ", Style::default().fg(color_muted())),
+        Span::styled(
+            if app.workspace.language() == "en" {
+                " insert  "
+            } else {
+                " insertar  "
+            },
+            Style::default().fg(color_muted()),
+        ),
         Span::styled(
             "Ctrl+P/N",
             Style::default()
                 .fg(color_text())
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" history  ", Style::default().fg(color_muted())),
+        Span::styled(
+            if app.workspace.language() == "en" {
+                " history  "
+            } else {
+                " historial  "
+            },
+            Style::default().fg(color_muted()),
+        ),
         Span::styled(
             "PgUp/PgDn",
             Style::default()
                 .fg(color_text())
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" scroll  ", Style::default().fg(color_muted())),
+        Span::styled(
+            if app.workspace.language() == "en" {
+                " scroll  "
+            } else {
+                " desplazar  "
+            },
+            Style::default().fg(color_muted()),
+        ),
         Span::styled(
             "q",
             Style::default()
                 .fg(color_text())
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" quit", Style::default().fg(color_muted())),
+        Span::styled(
+            if app.workspace.language() == "en" {
+                " quit"
+            } else {
+                " salir"
+            },
+            Style::default().fg(color_muted()),
+        ),
     ]);
     frame.render_widget(Paragraph::new(shortcuts), sections[2]);
 
@@ -609,7 +727,14 @@ fn insert_selected_suggestion(app: &App, state: &mut DashboardState) {
         &suggestion,
         !suggestion.ends_with('='),
     );
-    state.set_status(StatusLevel::Info, format!("Inserted `{suggestion}`."));
+    state.set_status(
+        StatusLevel::Info,
+        if app.workspace.language() == "en" {
+            format!("Inserted `{suggestion}`.")
+        } else {
+            format!("Insertado `{suggestion}`.")
+        },
+    );
 }
 
 fn submit_or_fill(app: &mut App, state: &mut DashboardState) -> Result<()> {
@@ -618,7 +743,14 @@ fn submit_or_fill(app: &mut App, state: &mut DashboardState) -> Result<()> {
         if let Some(command) = commands.get(state.selected_command) {
             state.input = format!("{} ", command.name);
             state.cursor = state.input.len();
-            state.set_status(StatusLevel::Info, format!("Inserted `{}`.", command.name));
+            state.set_status(
+                StatusLevel::Info,
+                if app.workspace.language() == "en" {
+                    format!("Inserted `{}`.", command.name)
+                } else {
+                    format!("Insertado `{}`.", command.name)
+                },
+            );
         }
         return Ok(());
     }
@@ -637,18 +769,36 @@ fn submit_or_fill(app: &mut App, state: &mut DashboardState) -> Result<()> {
     match execution {
         Ok(output) => {
             let rendered = if output.trim().is_empty() {
-                "(no output)".to_string()
+                if app.workspace.language() == "en" {
+                    "(no output)".to_string()
+                } else {
+                    "(sin salida)".to_string()
+                }
             } else {
                 output
             };
             state.push_run(command.clone(), true, rendered);
-            state.set_status(StatusLevel::Success, format!("Executed `{command}`."));
+            state.set_status(
+                StatusLevel::Success,
+                if app.workspace.language() == "en" {
+                    format!("Executed `{command}`.")
+                } else {
+                    format!("Ejecutado `{command}`.")
+                },
+            );
             state.clear_input();
         }
         Err(error) => {
             let message = format!("{error:#}");
             state.push_run(command.clone(), false, message.clone());
-            state.set_status(StatusLevel::Error, format!("Command failed: `{command}`."));
+            state.set_status(
+                StatusLevel::Error,
+                if app.workspace.language() == "en" {
+                    format!("Command failed: `{command}`.")
+                } else {
+                    format!("El comando falló: `{command}`.")
+                },
+            );
             state.clear_input();
         }
     }
