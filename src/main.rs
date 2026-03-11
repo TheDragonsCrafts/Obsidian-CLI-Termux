@@ -2,6 +2,7 @@ mod app;
 mod parser;
 mod registry;
 mod tui;
+mod updater;
 mod vault;
 
 use std::process::ExitCode;
@@ -22,6 +23,10 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<()> {
+    if let Err(error) = updater::check_and_auto_update() {
+        eprintln!("Auto-update omitido: {error:#}");
+    }
+
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     let mut app = App::load()?;
 

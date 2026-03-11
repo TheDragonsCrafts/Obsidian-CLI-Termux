@@ -55,6 +55,22 @@ En otras palabras: el backend local sirve para automatización fuerte sobre el v
 - Índice incremental cacheado por vault para headings, tags, tasks, properties, aliases y wikilinks.
 - TUI visual con navegador de comandos, sugerencias, historial persistente, scroll de salida y barra de comandos cuando se ejecuta `obsidian` sin subcomando.
 
+
+## Auto-update desde GitHub
+
+Al iniciar, la CLI ahora revisa (cada 12 horas) si hay una release más nueva en GitHub y, si la encuentra, ejecuta automáticamente:
+
+```bash
+cargo install --git https://github.com/<owner>/<repo>.git --bin obsidian --locked --force --root "$PREFIX"
+```
+
+Variables útiles:
+
+- `OBSIDIAN_CLI_GITHUB_REPO=<owner>/<repo>` para indicar el repositorio exacto.
+- `OBSIDIAN_CLI_AUTO_UPDATE=0` para desactivar el auto-update.
+
+Por defecto se usa `Obsidian-CLI-Termux/Obsidian-CLI-Termux` si no se define `OBSIDIAN_CLI_GITHUB_REPO`.
+
 ## Build
 
 ```bash
