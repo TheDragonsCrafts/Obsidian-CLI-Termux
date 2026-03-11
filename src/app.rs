@@ -11,6 +11,7 @@ use serde_json::{Value, json};
 
 use crate::parser::Invocation;
 use crate::registry::{SupportLevel, command_help, find, overview};
+use crate::updater;
 use crate::vault::{
     DailySettings, FileRecord, VaultContext, VaultIndex, Workspace, alias_rows,
     apply_template_tokens, count_bytes, json_string, normalize_rel_path, property_rows,
@@ -33,6 +34,7 @@ impl App {
         let output = match invocation.command.as_str() {
             "help" => self.cmd_help(&invocation)?,
             "version" => self.cmd_version(),
+            "update" => self.cmd_update(&invocation)?,
             "language" => self.cmd_language(&invocation)?,
             "vault" => self.cmd_vault(&invocation)?,
             "vaults" => self.cmd_vaults(&invocation)?,
@@ -547,6 +549,11 @@ impl App {
                 env!("CARGO_PKG_VERSION")
             )
         }
+    }
+
+    fn cmd_update(&self, invocation: &Invocation) -> Result<String> {
+        let force = invocation.has_flag("force");
+        updater::manual_update(force, self.workspace.language())
     }
 
     fn cmd_language(&mut self, invocation: &Invocation) -> Result<String> {
