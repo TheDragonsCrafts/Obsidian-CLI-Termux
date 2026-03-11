@@ -72,6 +72,47 @@ pub fn check_and_auto_update() -> Result<()> {
     Ok(())
 }
 
+pub fn manual_update(force: bool, language: &str) -> Result<String> {
+    let configured_repo = configured_repo();
+    let (repo, latest) = match fetch_latest_version(&configured_repo) {
+        Ok(latest) => (configured_repo.clone(), latest),
+        Err(_error) if configured_repo != DEFAULT_GITHUB_REPO => {
+            eprintln!(
+                "No se pudo consultar releases en {configured_repo}. Reintentando con repo por defecto {DEFAULT_GITHUB_REPO}..."
+            );
+            let latest = fetch_latest_version(DEFAULT_GITHUB_REPO).with_context(|| {
+                format!(
+                    "falló la consulta del repo configurado ({configured_repo}) y también del repo por defecto"
+                )
+            })?;
+            (DEFAULT_GITHUB_REPO.to_string(), latest)
+        }
+        Err(error) => return Err(error),
+    };
+
+    if let Some(latest) = latest {
+        write_state(Some(latest.clone()))?;
+        if !force && !is_newer(&latest, env!("CARGO_PKG_VERSION"))? {
+            return Ok(if language == "en" {
+                format!("Already up to date ({latest})")
+            } else {
+                format!("Ya está actualizado ({latest})")
+            });
+        }
+    } else {
+        write_state(None)?;
+    }
+
+    run_self_update(&repo)?;
+
+    Ok(if language == "en" {
+        "Manual update completed. Restart the command to use the new version.".to_string()
+    } else {
+        "Actualización manual completada. Reinicia el comando para usar la nueva versión."
+            .to_string()
+    })
+}
+
 fn configured_repo() -> String {
     std::env::var("OBSIDIAN_CLI_GITHUB_REPO")
         .ok()
@@ -213,12 +254,7 @@ mod tests {
 
     #[test]
     fn uses_env_repo_when_present() {
-        unsafe {
-            std::env::set_var(
-                "OBSIDIAN_CLI_GITHUB_REPO",
-                "CustomOrg/CustomRepo",
-            )
-        };
+        unsafe { std::env::set_var("OBSIDIAN_CLI_GITHUB_REPO", "CustomOrg/CustomRepo") };
         assert_eq!(configured_repo(), "CustomOrg/CustomRepo");
     }
 }

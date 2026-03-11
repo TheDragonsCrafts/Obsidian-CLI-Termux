@@ -39,6 +39,12 @@ pub const COMMANDS: &[CommandSpec] = &[
         SupportLevel::Local,
     ),
     spec(
+        "update",
+        "General",
+        "Ejecuta actualización manual del binario",
+        SupportLevel::Local,
+    ),
+    spec(
         "language",
         "General",
         "Consulta o cambia el idioma de la CLI/TUI",
