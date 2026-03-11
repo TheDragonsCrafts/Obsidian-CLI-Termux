@@ -1,3 +1,4 @@
 [toolchain]
 channel = "stable"
+components = ["rustfmt"]
 targets = ["aarch64-linux-android"]

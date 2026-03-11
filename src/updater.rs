@@ -44,9 +44,7 @@ pub fn check_and_auto_update() -> Result<()> {
         return Ok(());
     }
 
-    eprintln!(
-        "Nueva versión detectada ({latest}). Intentando auto-update desde GitHub..."
-    );
+    eprintln!("Nueva versión detectada ({latest}). Intentando auto-update desde GitHub...");
     run_self_update(&repo)?;
     eprintln!("Auto-update completado. Reinicia el comando para usar la versión nueva.");
 
@@ -56,7 +54,9 @@ pub fn check_and_auto_update() -> Result<()> {
 fn should_check_now() -> Result<bool> {
     let state = read_state()?;
     let now = now_unix();
-    if state.last_check_unix == 0 || now.saturating_sub(state.last_check_unix) >= CHECK_INTERVAL_SECS {
+    if state.last_check_unix == 0
+        || now.saturating_sub(state.last_check_unix) >= CHECK_INTERVAL_SECS
+    {
         write_state(state.last_seen_version)?;
         return Ok(true);
     }
@@ -76,11 +76,7 @@ fn fetch_latest_version(repo: &str) -> Result<String> {
         .read_json()
         .context("no se pudo parsear la respuesta de GitHub")?;
 
-    Ok(payload
-        .tag_name
-        .trim_start_matches('v')
-        .trim()
-        .to_string())
+    Ok(payload.tag_name.trim_start_matches('v').trim().to_string())
 }
 
 fn run_self_update(repo: &str) -> Result<()> {
@@ -114,8 +110,8 @@ fn run_self_update(repo: &str) -> Result<()> {
 fn is_newer(candidate: &str, current: &str) -> Result<bool> {
     let candidate = Version::parse(candidate)
         .with_context(|| format!("versión inválida en GitHub: {candidate}"))?;
-    let current = Version::parse(current)
-        .with_context(|| format!("versión local inválida: {current}"))?;
+    let current =
+        Version::parse(current).with_context(|| format!("versión local inválida: {current}"))?;
     Ok(candidate > current)
 }
 
@@ -146,7 +142,8 @@ fn write_state(last_seen_version: Option<String>) -> Result<()> {
 }
 
 fn state_path() -> Result<PathBuf> {
-    let config_base = dirs::config_dir().ok_or_else(|| anyhow!("no se pudo resolver XDG_CONFIG_HOME"))?;
+    let config_base =
+        dirs::config_dir().ok_or_else(|| anyhow!("no se pudo resolver XDG_CONFIG_HOME"))?;
     Ok(config_base
         .join("obsidian-termux-cli")
         .join("auto-update-state.json"))

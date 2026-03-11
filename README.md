@@ -131,6 +131,6 @@ export OBSIDIAN_CONFIG_DIR=/ruta/a/obsidian
 
 Notas:
 
-- `rust-toolchain.toml` fija `stable` y el target `aarch64-linux-android` para entornos con `rustup`.
+- `rust-toolchain.toml` fija `stable`, el target `aarch64-linux-android` y el componente `rustfmt` para que `cargo fmt` esté disponible en entornos con `rustup`.
 - En este workspace se verificó `cargo check --target aarch64-linux-android`.
 - En este workspace sí se generó un binario Android AArch64 usando el NDK oficial en `.tooling/android-ndk-r29`.
