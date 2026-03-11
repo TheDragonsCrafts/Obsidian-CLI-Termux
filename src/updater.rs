@@ -7,7 +7,7 @@ use anyhow::{Context, Result, anyhow};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 
-const DEFAULT_GITHUB_REPO: &str = "Obsidian-CLI-Termux/Obsidian-CLI-Termux";
+const DEFAULT_GITHUB_REPO: &str = "TheDragonsCrafts/Obsidian-CLI-Termux";
 const CHECK_INTERVAL_SECS: u64 = 60 * 60 * 12;
 
 #[derive(Debug, Deserialize)]
@@ -38,6 +38,16 @@ pub fn check_and_auto_update() -> Result<()> {
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| DEFAULT_GITHUB_REPO.to_string());
     let latest = fetch_latest_version(&repo)?;
+    let Some(latest) = latest else {
+        write_state(None)?;
+        eprintln!(
+            "No hay releases publicadas en {repo}. Intentando auto-update desde la rama por defecto..."
+        );
+        run_self_update(&repo)?;
+        eprintln!("Auto-update completado. Reinicia el comando para usar la versión nueva.");
+        return Ok(());
+    };
+
     write_state(Some(latest.clone()))?;
 
     if !is_newer(&latest, env!("CARGO_PKG_VERSION"))? {
@@ -63,20 +73,30 @@ fn should_check_now() -> Result<bool> {
     Ok(false)
 }
 
-fn fetch_latest_version(repo: &str) -> Result<String> {
+fn fetch_latest_version(repo: &str) -> Result<Option<String>> {
     let endpoint = format!("https://api.github.com/repos/{repo}/releases/latest");
-    let response = ureq::get(&endpoint)
+    let response = match ureq::get(&endpoint)
         .header("Accept", "application/vnd.github+json")
         .header("User-Agent", "obsidian-termux-cli-auto-updater")
         .call()
-        .with_context(|| format!("no se pudo consultar GitHub ({endpoint})"))?;
+    {
+        Ok(response) => response,
+        Err(ureq::Error::StatusCode(404)) => {
+            return Ok(None);
+        }
+        Err(error) => {
+            return Err(error).with_context(|| format!("no se pudo consultar GitHub ({endpoint})"));
+        }
+    };
 
     let payload: LatestRelease = response
         .into_body()
         .read_json()
         .context("no se pudo parsear la respuesta de GitHub")?;
 
-    Ok(payload.tag_name.trim_start_matches('v').trim().to_string())
+    Ok(Some(
+        payload.tag_name.trim_start_matches('v').trim().to_string(),
+    ))
 }
 
 fn run_self_update(repo: &str) -> Result<()> {
