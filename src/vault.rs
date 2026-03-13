@@ -611,30 +611,53 @@ impl VaultIndex {
             .map(|path| normalize_rel_path(&path.to_string_lossy()))
             .unwrap_or_default();
 
+        let norm_bytes = normalized.as_bytes();
+        let norm_len = norm_bytes.len();
+
         let mut ranked = self
             .markdown
             .keys()
             .filter_map(|candidate| {
                 let candidate_no_ext = candidate.trim_end_matches(".md");
+
+                // Quick exact matches
+                if candidate.eq_ignore_ascii_case(&normalized)
+                    || candidate_no_ext.eq_ignore_ascii_case(&normalized)
+                {
+                    return Some((score_candidate(&source_dir, candidate), candidate.clone()));
+                }
+
+                // Stem match
                 let candidate_name = Path::new(candidate_no_ext)
                     .file_name()
                     .and_then(OsStr::to_str)
-                    .unwrap_or(candidate_no_ext)
-                    .to_ascii_lowercase();
-                if candidate.eq_ignore_ascii_case(&normalized)
-                    || candidate_no_ext.eq_ignore_ascii_case(&normalized)
-                    || candidate_name == stem
-                    || candidate
-                        .to_ascii_lowercase()
-                        .ends_with(&format!("/{normalized}"))
-                    || candidate_no_ext
-                        .to_ascii_lowercase()
-                        .ends_with(&format!("/{normalized}"))
-                {
-                    Some((score_candidate(&source_dir, candidate), candidate.clone()))
-                } else {
-                    None
+                    .unwrap_or(candidate_no_ext);
+
+                if candidate_name.eq_ignore_ascii_case(&stem) {
+                    return Some((score_candidate(&source_dir, candidate), candidate.clone()));
                 }
+
+                if norm_len > 0 {
+                    let cand_bytes = candidate.as_bytes();
+                    if cand_bytes.len() > norm_len
+                        && cand_bytes[cand_bytes.len() - norm_len - 1] == b'/'
+                        && cand_bytes[cand_bytes.len() - norm_len..]
+                            .eq_ignore_ascii_case(norm_bytes)
+                    {
+                        return Some((score_candidate(&source_dir, candidate), candidate.clone()));
+                    }
+
+                    let cand_no_ext_bytes = candidate_no_ext.as_bytes();
+                    if cand_no_ext_bytes.len() > norm_len
+                        && cand_no_ext_bytes[cand_no_ext_bytes.len() - norm_len - 1] == b'/'
+                        && cand_no_ext_bytes[cand_no_ext_bytes.len() - norm_len..]
+                            .eq_ignore_ascii_case(norm_bytes)
+                    {
+                        return Some((score_candidate(&source_dir, candidate), candidate.clone()));
+                    }
+                }
+
+                None
             })
             .collect::<Vec<_>>();
 
