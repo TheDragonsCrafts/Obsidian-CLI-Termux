@@ -10,8 +10,8 @@ fn resolve_note_filter_old(candidate: &str, normalized: &str, stem: &str) -> boo
         .and_then(OsStr::to_str)
         .unwrap_or(candidate_no_ext)
         .to_ascii_lowercase();
-    candidate.eq_ignore_ascii_case(&normalized)
-        || candidate_no_ext.eq_ignore_ascii_case(&normalized)
+    candidate.eq_ignore_ascii_case(normalized)
+        || candidate_no_ext.eq_ignore_ascii_case(normalized)
         || candidate_name == stem
         || candidate
             .to_ascii_lowercase()
@@ -50,7 +50,7 @@ fn resolve_note_filter_new(candidate: &str, normalized: &str, stem: &str) -> boo
     }
 
     let cand_bytes = candidate.as_bytes();
-    if cand_bytes.len() > norm_len + 1
+    if cand_bytes.len() > norm_len
         && cand_bytes[cand_bytes.len() - norm_len - 1] == b'/'
         && cand_bytes[cand_bytes.len() - norm_len..].eq_ignore_ascii_case(norm_bytes)
     {
@@ -58,7 +58,7 @@ fn resolve_note_filter_new(candidate: &str, normalized: &str, stem: &str) -> boo
     }
 
     let cand_no_ext_bytes = candidate_no_ext.as_bytes();
-    if cand_no_ext_bytes.len() > norm_len + 1
+    if cand_no_ext_bytes.len() > norm_len
         && cand_no_ext_bytes[cand_no_ext_bytes.len() - norm_len - 1] == b'/'
         && cand_no_ext_bytes[cand_no_ext_bytes.len() - norm_len..].eq_ignore_ascii_case(norm_bytes)
     {

@@ -639,7 +639,7 @@ impl VaultIndex {
 
                 if norm_len > 0 {
                     let cand_bytes = candidate.as_bytes();
-                    if cand_bytes.len() >= norm_len + 1
+                    if cand_bytes.len() > norm_len
                         && cand_bytes[cand_bytes.len() - norm_len - 1] == b'/'
                         && cand_bytes[cand_bytes.len() - norm_len..]
                             .eq_ignore_ascii_case(norm_bytes)
@@ -648,7 +648,7 @@ impl VaultIndex {
                     }
 
                     let cand_no_ext_bytes = candidate_no_ext.as_bytes();
-                    if cand_no_ext_bytes.len() >= norm_len + 1
+                    if cand_no_ext_bytes.len() > norm_len
                         && cand_no_ext_bytes[cand_no_ext_bytes.len() - norm_len - 1] == b'/'
                         && cand_no_ext_bytes[cand_no_ext_bytes.len() - norm_len..]
                             .eq_ignore_ascii_case(norm_bytes)
