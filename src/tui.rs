@@ -224,9 +224,9 @@ impl DashboardState {
         let next = (current + delta).clamp(0, len.saturating_sub(1) as isize);
         self.selected_command = next as usize;
 
-        if delta > 0 && self.selected_command as u16 > self.commands_scroll {
-            self.commands_scroll = self.selected_command as u16;
-        } else if delta < 0 && (self.selected_command as u16) < self.commands_scroll {
+        if (delta > 0 && self.selected_command as u16 > self.commands_scroll)
+            || (delta < 0 && (self.selected_command as u16) < self.commands_scroll)
+        {
             self.commands_scroll = self.selected_command as u16;
         }
     }
