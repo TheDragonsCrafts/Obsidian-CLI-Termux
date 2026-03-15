@@ -78,22 +78,20 @@ fn run_loop(
             }
             Event::Mouse(mouse) => match mouse.kind {
                 MouseEventKind::ScrollDown => match state.focus {
-                    FocusArea::Commands => {
+                    FocusArea::Commands | FocusArea::Input => {
                         let len = commands.len();
                         state.scroll_commands(2, len)
                     }
                     FocusArea::Output => state.scroll_output(3),
                     FocusArea::Runs => state.scroll_runs(2),
-                    _ => {}
                 },
                 MouseEventKind::ScrollUp => match state.focus {
-                    FocusArea::Commands => {
+                    FocusArea::Commands | FocusArea::Input => {
                         let len = commands.len();
                         state.scroll_commands(-2, len)
                     }
                     FocusArea::Output => state.scroll_output(-3),
                     FocusArea::Runs => state.scroll_runs(-2),
-                    _ => {}
                 },
                 _ => {}
             },
@@ -370,22 +368,20 @@ fn handle_key(app: &mut App, state: &mut DashboardState, key: KeyEvent) -> Resul
         },
         KeyCode::BackTab => state.cycle_focus(),
         KeyCode::Up => match state.focus {
-            FocusArea::Commands => {
+            FocusArea::Commands | FocusArea::Input => {
                 let commands = state.filtered_commands();
                 state.move_selection(-1, commands.len());
             }
             FocusArea::Output => state.scroll_output(-2),
             FocusArea::Runs => state.move_run_selection(-1),
-            FocusArea::Input => history_prev(state),
         },
         KeyCode::Down => match state.focus {
-            FocusArea::Commands => {
+            FocusArea::Commands | FocusArea::Input => {
                 let commands = state.filtered_commands();
                 state.move_selection(1, commands.len());
             }
             FocusArea::Output => state.scroll_output(2),
             FocusArea::Runs => state.move_run_selection(1),
-            FocusArea::Input => history_next(state),
         },
         KeyCode::Left => move_cursor_left(state),
         KeyCode::Right => move_cursor_right(state),
