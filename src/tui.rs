@@ -78,22 +78,20 @@ fn run_loop(
             }
             Event::Mouse(mouse) => match mouse.kind {
                 MouseEventKind::ScrollDown => match state.focus {
-                    FocusArea::Commands => {
+                    FocusArea::Commands | FocusArea::Input => {
                         let len = commands.len();
                         state.scroll_commands(2, len)
                     }
                     FocusArea::Output => state.scroll_output(3),
                     FocusArea::Runs => state.scroll_runs(2),
-                    _ => {}
                 },
                 MouseEventKind::ScrollUp => match state.focus {
-                    FocusArea::Commands => {
+                    FocusArea::Commands | FocusArea::Input => {
                         let len = commands.len();
                         state.scroll_commands(-2, len)
                     }
                     FocusArea::Output => state.scroll_output(-3),
                     FocusArea::Runs => state.scroll_runs(-2),
-                    _ => {}
                 },
                 _ => {}
             },
@@ -226,9 +224,9 @@ impl DashboardState {
         let next = (current + delta).clamp(0, len.saturating_sub(1) as isize);
         self.selected_command = next as usize;
 
-        if delta > 0 && self.selected_command as u16 > self.commands_scroll {
-            self.commands_scroll = self.selected_command as u16;
-        } else if delta < 0 && (self.selected_command as u16) < self.commands_scroll {
+        if (delta > 0 && self.selected_command as u16 > self.commands_scroll)
+            || (delta < 0 && (self.selected_command as u16) < self.commands_scroll)
+        {
             self.commands_scroll = self.selected_command as u16;
         }
     }
@@ -370,22 +368,20 @@ fn handle_key(app: &mut App, state: &mut DashboardState, key: KeyEvent) -> Resul
         },
         KeyCode::BackTab => state.cycle_focus(),
         KeyCode::Up => match state.focus {
-            FocusArea::Commands => {
+            FocusArea::Commands | FocusArea::Input => {
                 let commands = state.filtered_commands();
                 state.move_selection(-1, commands.len());
             }
             FocusArea::Output => state.scroll_output(-2),
             FocusArea::Runs => state.move_run_selection(-1),
-            FocusArea::Input => history_prev(state),
         },
         KeyCode::Down => match state.focus {
-            FocusArea::Commands => {
+            FocusArea::Commands | FocusArea::Input => {
                 let commands = state.filtered_commands();
                 state.move_selection(1, commands.len());
             }
             FocusArea::Output => state.scroll_output(2),
             FocusArea::Runs => state.move_run_selection(1),
-            FocusArea::Input => history_next(state),
         },
         KeyCode::Left => move_cursor_left(state),
         KeyCode::Right => move_cursor_right(state),
