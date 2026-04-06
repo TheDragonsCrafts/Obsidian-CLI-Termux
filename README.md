@@ -151,3 +151,8 @@ Notas:
 - `rust-toolchain.toml` fija `stable`, el target `aarch64-linux-android` y el componente `rustfmt` para que `cargo fmt` esté disponible en entornos con `rustup`.
 - En este workspace se verificó `cargo check --target aarch64-linux-android`.
 - En este workspace sí se generó un binario Android AArch64 usando el NDK oficial en `.tooling/android-ndk-r29`.
+
+
+## Licencia
+
+Este proyecto se distribuye bajo la licencia MIT. Consulta el archivo `LICENSE`.
