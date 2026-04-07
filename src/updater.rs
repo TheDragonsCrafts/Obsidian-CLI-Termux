@@ -372,7 +372,7 @@ fn write_state(last_seen_version: Option<String>) -> Result<()> {
 }
 
 fn auto_apply_enabled() -> bool {
-    std::env::var("OBSIDIAN_CLI_AUTO_UPDATE_APPLY")
+    !std::env::var("OBSIDIAN_CLI_AUTO_UPDATE_SAFE")
         .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
         .unwrap_or(false)
 }
