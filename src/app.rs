@@ -116,7 +116,7 @@ impl App {
             copy_to_clipboard(&output)?;
         }
 
-        self.workspace.save()?;
+        self.workspace.save_if_dirty()?;
         Ok(output)
     }
 }
@@ -345,8 +345,7 @@ fn contains_query(line: &str, query: &str, case_sensitive: bool) -> bool {
     if case_sensitive {
         line.contains(query)
     } else {
-        line.to_ascii_lowercase()
-            .contains(&query.to_ascii_lowercase())
+        line.to_ascii_lowercase().contains(query)
     }
 }
 
@@ -1069,8 +1068,53 @@ impl App {
         let scope = invocation.param("path").map(normalize_rel_path);
         let mut hits = Vec::<Value>::new();
         let mut seen_files = BTreeSet::new();
+        let index = vault.load_index()?;
 
-        for file in vault.list_files(None, None)? {
+        if !with_context && !case_sensitive {
+            for (rel_path, file) in &index.files {
+                if hits.len() >= limit {
+                    break;
+                }
+                if !file.is_markdown && !is_text_candidate(rel_path) {
+                    continue;
+                }
+                if let Some(scope) = scope.as_deref()
+                    && !rel_path.starts_with(scope)
+                {
+                    continue;
+                }
+
+                let matched = if file.is_markdown {
+                    index
+                        .markdown
+                        .get(rel_path)
+                        .map(|meta| meta.search_blob.contains(&search_query))
+                        .unwrap_or(false)
+                } else if let Ok(text) = vault.read_text(rel_path) {
+                    text.to_ascii_lowercase().contains(&search_query)
+                } else {
+                    false
+                };
+
+                if matched {
+                    hits.push(json!({ "path": rel_path }));
+                }
+            }
+
+            if invocation.has_flag("total") {
+                return Ok(hits.len().to_string());
+            }
+            if invocation.param("format") == Some("json") {
+                return Ok(serde_json::to_string_pretty(&hits)?);
+            }
+            return Ok(hits
+                .iter()
+                .filter_map(|value| value.get("path").and_then(Value::as_str))
+                .collect::<Vec<_>>()
+                .join("\n"));
+        }
+
+        for file in index.files.values() {
             if hits.len() >= limit {
                 break;
             }
