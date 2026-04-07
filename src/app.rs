@@ -122,7 +122,7 @@ impl App {
             copy_to_clipboard(&output)?;
         }
 
-        self.workspace.save()?;
+        self.workspace.save_if_dirty()?;
         Ok(output)
     }
 }
@@ -348,7 +348,11 @@ fn create_target_path(invocation: &Invocation) -> Result<String> {
 /// Checks if a line contains a search query.
 /// If `case_sensitive` is false, `query` MUST already be lowercased.
 fn contains_query(line: &str, query: &str, case_sensitive: bool) -> bool {
-    crate::search_index::contains_query(line, query, case_sensitive)
+    if case_sensitive {
+        line.contains(query)
+    } else {
+        line.to_ascii_lowercase().contains(query)
+    }
 }
 
 fn task_matches(task: &crate::vault::TaskItem, invocation: &Invocation) -> bool {
@@ -1076,17 +1080,73 @@ impl App {
             .unwrap_or(false);
         let resolution = resolve_engine(requested_engine, loaded_index.is_ok(), index_is_fresh)?;
         let scope = invocation.param("path").map(normalize_rel_path);
-        let hits = match resolution {
-            EngineResolution::Index => search_in_index(
-                &loaded_index?,
-                &search_query,
-                case_sensitive,
-                scope.as_deref(),
-                with_context,
-                limit,
-            )
-            .into_iter()
-            .map(|hit| {
+        let mut hits = Vec::<Value>::new();
+        let mut seen_files = BTreeSet::new();
+        let index = vault.load_index()?;
+
+        if !with_context && !case_sensitive {
+            for (rel_path, file) in &index.files {
+                if hits.len() >= limit {
+                    break;
+                }
+                if !file.is_markdown && !is_text_candidate(rel_path) {
+                    continue;
+                }
+                if let Some(scope) = scope.as_deref()
+                    && !rel_path.starts_with(scope)
+                {
+                    continue;
+                }
+
+                let matched = if file.is_markdown {
+                    index
+                        .markdown
+                        .get(rel_path)
+                        .map(|meta| meta.search_blob.contains(&search_query))
+                        .unwrap_or(false)
+                } else if let Ok(text) = vault.read_text(rel_path) {
+                    text.to_ascii_lowercase().contains(&search_query)
+                } else {
+                    false
+                };
+
+                if matched {
+                    hits.push(json!({ "path": rel_path }));
+                }
+            }
+
+            if invocation.has_flag("total") {
+                return Ok(hits.len().to_string());
+            }
+            if invocation.param("format") == Some("json") {
+                return Ok(serde_json::to_string_pretty(&hits)?);
+            }
+            return Ok(hits
+                .iter()
+                .filter_map(|value| value.get("path").and_then(Value::as_str))
+                .collect::<Vec<_>>()
+                .join("\n"));
+        }
+
+        for file in index.files.values() {
+            if hits.len() >= limit {
+                break;
+            }
+            if !file.is_markdown && !is_text_candidate(&file.rel_path) {
+                continue;
+            }
+            if let Some(scope) = scope.as_deref()
+                && !file.rel_path.starts_with(scope)
+            {
+                continue;
+            }
+            let Ok(text) = vault.read_text(&file.rel_path) else {
+                continue;
+            };
+            for (index, line) in text.lines().enumerate() {
+                if !contains_query(line, &search_query, case_sensitive) {
+                    continue;
+                }
                 if with_context {
                     json!({ "path": hit.path, "line": hit.line, "text": hit.text })
                 } else {

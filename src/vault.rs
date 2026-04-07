@@ -3,7 +3,7 @@ use std::ffi::OsStr;
 use std::fs;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::Local;
@@ -70,6 +70,7 @@ pub struct Workspace {
     pub runtime: RuntimePaths,
     pub known_vaults: Vec<KnownVault>,
     pub state: SessionState,
+    dirty: bool,
 }
 
 impl Workspace {
@@ -85,7 +86,7 @@ impl Workspace {
             SessionState::default()
         };
 
-        let mut known_vaults = discover_known_vaults();
+        let mut known_vaults = discover_known_vaults(&runtime);
         known_vaults.sort_by(|left, right| left.name.cmp(&right.name));
         known_vaults.dedup_by(|left, right| left.path == right.path);
 
@@ -94,12 +95,17 @@ impl Workspace {
             runtime,
             known_vaults,
             state,
+            dirty: false,
         })
     }
 
-    pub fn save(&self) -> Result<()> {
+    pub fn save_if_dirty(&mut self) -> Result<()> {
+        if !self.dirty {
+            return Ok(());
+        }
         let body = serde_json::to_string_pretty(&self.state)?;
         fs::write(&self.runtime.state_file, body)?;
+        self.dirty = false;
         Ok(())
     }
 
@@ -141,6 +147,7 @@ impl Workspace {
 
     pub fn set_active_vault(&mut self, vault: &VaultContext) {
         self.state.active_vault_path = Some(vault.root.to_string_lossy().to_string());
+        self.dirty = true;
     }
 
     pub fn language(&self) -> &str {
@@ -149,6 +156,7 @@ impl Workspace {
 
     pub fn set_language(&mut self, language: &str) {
         self.state.language = Some(language.to_string());
+        self.dirty = true;
     }
 
     pub fn set_active_file(&mut self, vault: &VaultContext, rel_path: &str) {
@@ -162,6 +170,7 @@ impl Workspace {
             && self.state.active_file.as_deref() == Some(rel_path)
         {
             self.state.active_file = None;
+            self.dirty = true;
         }
     }
 
@@ -186,6 +195,7 @@ impl Workspace {
             },
         );
         self.state.recents.truncate(50);
+        self.dirty = true;
     }
 
     fn match_vault(&self, selector: &str) -> Result<KnownVault> {
@@ -732,6 +742,8 @@ pub struct MarkdownMeta {
     pub links: Vec<String>,
     pub word_count: usize,
     pub character_count: usize,
+    #[serde(default)]
+    pub search_blob: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -769,7 +781,8 @@ fn build_cached_entry(
     abs: &Path,
 ) -> Result<CachedFileEntry> {
     let markdown = if is_markdown_path(abs) {
-        let text = fs::read_to_string(abs).unwrap_or_default();
+        let text = fs::read_to_string(abs)
+            .with_context(|| format!("no se pudo leer markdown cacheado: {}", abs.display()))?;
         Some(parse_markdown(&text))
     } else {
         None
@@ -892,6 +905,7 @@ pub fn parse_markdown(text: &str) -> MarkdownMeta {
         links,
         word_count: body.split_whitespace().count(),
         character_count: body.chars().count(),
+        search_blob: body.to_ascii_lowercase(),
     }
 }
 
@@ -1116,7 +1130,49 @@ fn runtime_paths() -> Result<RuntimePaths> {
     })
 }
 
-fn discover_known_vaults() -> Vec<KnownVault> {
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct KnownVaultsCache {
+    version: u32,
+    scanned_at_ms: u64,
+    vaults: Vec<KnownVault>,
+}
+
+fn discover_known_vaults(runtime: &RuntimePaths) -> Vec<KnownVault> {
+    let cache_file = runtime.cache_dir.join("known-vaults.json");
+    if let Some(cached) = load_known_vaults_cache(&cache_file) {
+        return cached;
+    }
+
+    let known = discover_known_vaults_uncached();
+    let cache = KnownVaultsCache {
+        version: 1,
+        scanned_at_ms: to_millis(Some(SystemTime::now())),
+        vaults: known.clone(),
+    };
+    if let Ok(text) = serde_json::to_string(&cache) {
+        let _ = fs::write(cache_file, text);
+    }
+    known
+}
+
+fn load_known_vaults_cache(path: &Path) -> Option<Vec<KnownVault>> {
+    if !path.exists() {
+        return None;
+    }
+    let text = fs::read_to_string(path).ok()?;
+    let cache = serde_json::from_str::<KnownVaultsCache>(&text).ok()?;
+    if cache.version != 1 {
+        return None;
+    }
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?;
+    let scanned = Duration::from_millis(cache.scanned_at_ms);
+    if now.saturating_sub(scanned) > Duration::from_secs(60 * 60 * 6) {
+        return None;
+    }
+    Some(cache.vaults)
+}
+
+fn discover_known_vaults_uncached() -> Vec<KnownVault> {
     let mut candidates = Vec::new();
     if let Some(config_dir) = dirs::config_dir() {
         candidates.push(config_dir.join("obsidian").join("obsidian.json"));
@@ -1237,8 +1293,20 @@ fn read_cache(path: &Path) -> Result<StoredIndex> {
 }
 
 fn write_cache(path: &Path, cache: &StoredIndex) -> Result<()> {
-    let mut file = fs::File::create(path)?;
-    file.write_all(serde_json::to_string(cache)?.as_bytes())?;
+    atomic_write_bytes(path, serde_json::to_string(cache)?.as_bytes())?;
+    Ok(())
+}
+
+fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow!("ruta inválida para escritura atómica: {}", path.display()))?;
+    let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
+    tmp.write_all(bytes)?;
+    tmp.as_file().sync_all()?;
+    tmp.persist(path)
+        .map_err(|error| anyhow!(error.error))
+        .with_context(|| format!("no se pudo reemplazar {}", path.display()))?;
     Ok(())
 }
 

@@ -1,6 +1,8 @@
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow};
@@ -9,6 +11,13 @@ use serde::{Deserialize, Serialize};
 
 const DEFAULT_GITHUB_REPO: &str = "TheDragonsCrafts/Obsidian-CLI-Termux";
 const CHECK_INTERVAL_SECS: u64 = 60 * 60 * 12;
+const FETCH_TIMEOUT_SECS: u64 = 4;
+const FETCH_RETRIES: u8 = 3;
+const FETCH_BACKOFF_BASE_MS: u64 = 250;
+const BREAKER_THRESHOLD: u8 = 2;
+
+static UPDATE_CIRCUIT_OPEN: AtomicBool = AtomicBool::new(false);
+static UPDATE_FAIL_STREAK: AtomicU8 = AtomicU8::new(0);
 
 #[derive(Debug, Deserialize)]
 struct LatestRelease {
@@ -30,6 +39,10 @@ pub fn check_and_auto_update() -> Result<()> {
     }
 
     if !should_check_now()? {
+        return Ok(());
+    }
+    if UPDATE_CIRCUIT_OPEN.load(Ordering::Relaxed) {
+        eprintln!("Auto-update omitido: circuito abierto por fallos previos en esta sesión.");
         return Ok(());
     }
 
@@ -54,8 +67,14 @@ pub fn check_and_auto_update() -> Result<()> {
         eprintln!(
             "No hay releases publicadas en {repo}. Intentando auto-update desde la rama por defecto..."
         );
-        run_self_update(&repo)?;
-        eprintln!("Auto-update completado. Reinicia el comando para usar la versión nueva.");
+        if auto_apply_enabled() {
+            run_self_update(&repo, None)?;
+            eprintln!("Auto-update completado. Reinicia el comando para usar la versión nueva.");
+        } else {
+            eprintln!(
+                "Auto-update disponible, pero en modo seguro (solo check). Ejecuta `update` para aplicar."
+            );
+        }
         return Ok(());
     };
 
@@ -65,8 +84,15 @@ pub fn check_and_auto_update() -> Result<()> {
         return Ok(());
     }
 
+    if !auto_apply_enabled() {
+        eprintln!(
+            "Nueva versión detectada ({latest}). Modo seguro activo: no se aplica automáticamente. Ejecuta `update` para confirmar."
+        );
+        return Ok(());
+    }
+
     eprintln!("Nueva versión detectada ({latest}). Intentando auto-update desde GitHub...");
-    run_self_update(&repo)?;
+    run_self_update(&repo, None)?;
     eprintln!("Auto-update completado. Reinicia el comando para usar la versión nueva.");
 
     Ok(())
@@ -103,7 +129,7 @@ pub fn manual_update(force: bool, language: &str) -> Result<String> {
         write_state(None)?;
     }
 
-    let install_output = run_self_update(&repo)?;
+    let install_output = run_self_update(&repo, pinned_ref().as_deref())?;
 
     let progress = render_update_progress(language);
     let details = if install_output.trim().is_empty() {
@@ -158,31 +184,61 @@ fn should_check_now() -> Result<bool> {
 
 fn fetch_latest_version(repo: &str) -> Result<Option<String>> {
     let endpoint = format!("https://api.github.com/repos/{repo}/releases/latest");
-    let response = match ureq::get(&endpoint)
-        .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", "obsidian-termux-cli-auto-updater")
-        .call()
-    {
-        Ok(response) => response,
-        Err(ureq::Error::StatusCode(404)) => {
-            return Ok(None);
-        }
-        Err(error) => {
-            return Err(error).with_context(|| format!("no se pudo consultar GitHub ({endpoint})"));
-        }
-    };
+    let mut last_error: Option<anyhow::Error> = None;
+    for attempt in 1..=FETCH_RETRIES {
+        let config = ureq::Agent::config_builder()
+            .timeout_global(Some(Duration::from_secs(FETCH_TIMEOUT_SECS)))
+            .build();
+        let agent: ureq::Agent = config.into();
+        match agent
+            .get(&endpoint)
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", "obsidian-termux-cli-auto-updater")
+            .call()
+        {
+            Ok(response) => {
+                UPDATE_FAIL_STREAK.store(0, Ordering::Relaxed);
+                UPDATE_CIRCUIT_OPEN.store(false, Ordering::Relaxed);
 
-    let payload: LatestRelease = response
-        .into_body()
-        .read_json()
-        .context("no se pudo parsear la respuesta de GitHub")?;
+                let payload: LatestRelease = response
+                    .into_body()
+                    .read_json()
+                    .context("no se pudo parsear la respuesta de GitHub")?;
 
-    Ok(Some(
-        payload.tag_name.trim_start_matches('v').trim().to_string(),
-    ))
+                return Ok(Some(
+                    payload.tag_name.trim_start_matches('v').trim().to_string(),
+                ));
+            }
+            Err(ureq::Error::StatusCode(404)) => {
+                UPDATE_FAIL_STREAK.store(0, Ordering::Relaxed);
+                UPDATE_CIRCUIT_OPEN.store(false, Ordering::Relaxed);
+                return Ok(None);
+            }
+            Err(error) => {
+                last_error = Some(
+                    anyhow!(error).context(format!("no se pudo consultar GitHub ({endpoint})")),
+                );
+            }
+        }
+
+        if attempt < FETCH_RETRIES {
+            thread::sleep(Duration::from_millis(
+                FETCH_BACKOFF_BASE_MS * (attempt as u64),
+            ));
+        }
+    }
+
+    let streak = UPDATE_FAIL_STREAK
+        .fetch_add(1, Ordering::Relaxed)
+        .saturating_add(1);
+    if streak >= BREAKER_THRESHOLD {
+        UPDATE_CIRCUIT_OPEN.store(true, Ordering::Relaxed);
+    }
+
+    Err(last_error.unwrap_or_else(|| anyhow!("error desconocido consultando GitHub")))
 }
 
-fn run_self_update(repo: &str) -> Result<String> {
+fn run_self_update(repo: &str, pinned_ref: Option<&str>) -> Result<String> {
     let install_url = format!("https://github.com/{repo}.git");
     let root = std::env::var("PREFIX").unwrap_or_else(|_| {
         dirs::home_dir()
@@ -190,14 +246,27 @@ fn run_self_update(repo: &str) -> Result<String> {
             .unwrap_or_else(|| ".".to_string())
     });
 
-    let output = Command::new("cargo")
+    let mut command = Command::new("cargo");
+    command
         .arg("install")
         .arg("--git")
         .arg(install_url)
         .arg("--bin")
         .arg("obsidian")
         .arg("--locked")
-        .arg("--force")
+        .arg("--force");
+    if let Some(reference) = pinned_ref {
+        if let Some(value) = reference.strip_prefix("tag:") {
+            command.arg("--tag").arg(value.trim());
+        } else if let Some(value) = reference.strip_prefix("rev:") {
+            command.arg("--rev").arg(value.trim());
+        } else if let Some(value) = reference.strip_prefix("branch:") {
+            command.arg("--branch").arg(value.trim());
+        } else {
+            command.arg("--tag").arg(reference);
+        }
+    }
+    let output = command
         .arg("--root")
         .arg(root)
         .output()
@@ -298,7 +367,34 @@ fn write_state(last_seen_version: Option<String>) -> Result<()> {
         last_check_unix: now_unix(),
         last_seen_version,
     };
-    fs::write(&path, serde_json::to_vec_pretty(&state)?)?;
+    atomic_write_bytes(&path, &serde_json::to_vec_pretty(&state)?)?;
+    Ok(())
+}
+
+fn auto_apply_enabled() -> bool {
+    !std::env::var("OBSIDIAN_CLI_AUTO_UPDATE_SAFE")
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+}
+
+fn pinned_ref() -> Option<String> {
+    std::env::var("OBSIDIAN_CLI_UPDATE_PIN")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn atomic_write_bytes(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow!("ruta inválida para escritura atómica: {}", path.display()))?;
+    let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
+    use std::io::Write;
+    tmp.write_all(bytes)?;
+    tmp.as_file().sync_all()?;
+    tmp.persist(path)
+        .map_err(|error| anyhow!(error.error))
+        .with_context(|| format!("no se pudo reemplazar {}", path.display()))?;
     Ok(())
 }
 
