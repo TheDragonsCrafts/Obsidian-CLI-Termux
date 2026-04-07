@@ -11,6 +11,9 @@ use serde_json::{Value, json};
 
 use crate::parser::Invocation;
 use crate::registry::{SupportLevel, command_help, find, overview};
+use crate::search_index::{
+    EngineResolution, parse_search_engine, resolve_engine, search as search_in_index,
+};
 use crate::updater;
 use crate::vault::{
     DailySettings, FileRecord, VaultContext, VaultIndex, Workspace, alias_rows,
@@ -64,6 +67,9 @@ impl App {
             "daily:prepend" => self.cmd_daily_prepend(&invocation)?,
             "search" => self.cmd_search(&invocation, false)?,
             "search:context" => self.cmd_search(&invocation, true)?,
+            "index:build" => self.cmd_index_build(&invocation)?,
+            "index:status" => self.cmd_index_status(&invocation)?,
+            "index:clean" => self.cmd_index_clean(&invocation)?,
             "tags" => self.cmd_tags(&invocation)?,
             "tag" => self.cmd_tag(&invocation)?,
             "tasks" => self.cmd_tasks(&invocation)?,
@@ -342,12 +348,7 @@ fn create_target_path(invocation: &Invocation) -> Result<String> {
 /// Checks if a line contains a search query.
 /// If `case_sensitive` is false, `query` MUST already be lowercased.
 fn contains_query(line: &str, query: &str, case_sensitive: bool) -> bool {
-    if case_sensitive {
-        line.contains(query)
-    } else {
-        line.to_ascii_lowercase()
-            .contains(&query.to_ascii_lowercase())
-    }
+    crate::search_index::contains_query(line, query, case_sensitive)
 }
 
 fn task_matches(task: &crate::vault::TaskItem, invocation: &Invocation) -> bool {
@@ -1066,43 +1067,72 @@ impl App {
         } else {
             query.to_ascii_lowercase()
         };
+        let requested_engine = parse_search_engine(invocation.param("engine"))?;
+        let loaded_index = crate::search_index::load(&vault);
+        let index_is_fresh = loaded_index
+            .as_ref()
+            .ok()
+            .and_then(|index| crate::search_index::is_fresh(&vault, index).ok())
+            .unwrap_or(false);
+        let resolution = resolve_engine(requested_engine, loaded_index.is_ok(), index_is_fresh)?;
         let scope = invocation.param("path").map(normalize_rel_path);
-        let mut hits = Vec::<Value>::new();
-        let mut seen_files = BTreeSet::new();
-
-        for file in vault.list_files(None, None)? {
-            if hits.len() >= limit {
-                break;
-            }
-            if !file.is_markdown && !is_text_candidate(&file.rel_path) {
-                continue;
-            }
-            if let Some(scope) = scope.as_deref()
-                && !file.rel_path.starts_with(scope)
-            {
-                continue;
-            }
-            let Ok(text) = vault.read_text(&file.rel_path) else {
-                continue;
-            };
-            for (index, line) in text.lines().enumerate() {
-                if !contains_query(line, &search_query, case_sensitive) {
-                    continue;
-                }
+        let hits = match resolution {
+            EngineResolution::Index => search_in_index(
+                &loaded_index?,
+                &search_query,
+                case_sensitive,
+                scope.as_deref(),
+                with_context,
+                limit,
+            )
+            .into_iter()
+            .map(|hit| {
                 if with_context {
-                    hits.push(json!({
-                        "path": file.rel_path,
-                        "line": index + 1,
-                        "text": line,
-                    }));
-                } else if seen_files.insert(file.rel_path.clone()) {
-                    hits.push(json!({ "path": file.rel_path }));
+                    json!({ "path": hit.path, "line": hit.line, "text": hit.text })
+                } else {
+                    json!({ "path": hit.path })
                 }
-                if hits.len() >= limit {
-                    break;
+            })
+            .collect::<Vec<_>>(),
+            EngineResolution::Scan => {
+                let mut hits = Vec::<Value>::new();
+                let mut seen_files = BTreeSet::new();
+                for file in vault.list_files(None, None)? {
+                    if hits.len() >= limit {
+                        break;
+                    }
+                    if !file.is_markdown && !is_text_candidate(&file.rel_path) {
+                        continue;
+                    }
+                    if let Some(scope) = scope.as_deref()
+                        && !file.rel_path.starts_with(scope)
+                    {
+                        continue;
+                    }
+                    let Ok(text) = vault.read_text(&file.rel_path) else {
+                        continue;
+                    };
+                    for (index, line) in text.lines().enumerate() {
+                        if !contains_query(line, &search_query, case_sensitive) {
+                            continue;
+                        }
+                        if with_context {
+                            hits.push(json!({
+                                "path": file.rel_path,
+                                "line": index + 1,
+                                "text": line,
+                            }));
+                        } else if seen_files.insert(file.rel_path.clone()) {
+                            hits.push(json!({ "path": file.rel_path }));
+                        }
+                        if hits.len() >= limit {
+                            break;
+                        }
+                    }
                 }
+                hits
             }
-        }
+        };
 
         if invocation.has_flag("total") {
             return Ok(hits.len().to_string());
@@ -1123,6 +1153,57 @@ impl App {
                 .collect::<Vec<_>>()
                 .join("\n"))
         }
+    }
+
+    fn cmd_index_build(&self, invocation: &Invocation) -> Result<String> {
+        let vault = self
+            .workspace
+            .open_vault(invocation.global.vault.as_deref())?;
+        let status = crate::search_index::build(&vault)?;
+        if invocation.param("format") == Some("json") {
+            return Ok(serde_json::to_string_pretty(&status)?);
+        }
+        Ok(key_value_block(&[
+            ("version", status.version.to_string()),
+            ("files", status.files.to_string()),
+            ("bytes", status.bytes.to_string()),
+            ("updated_ms", status.updated_ms.to_string()),
+            ("path", status.path),
+        ]))
+    }
+
+    fn cmd_index_status(&self, invocation: &Invocation) -> Result<String> {
+        let vault = self
+            .workspace
+            .open_vault(invocation.global.vault.as_deref())?;
+        let status = crate::search_index::status(&vault)?;
+        if invocation.param("format") == Some("json") {
+            return Ok(serde_json::to_string_pretty(&status)?);
+        }
+        Ok(key_value_block(&[
+            ("version", status.version.to_string()),
+            ("files", status.files.to_string()),
+            ("bytes", status.bytes.to_string()),
+            ("updated_ms", status.updated_ms.to_string()),
+            ("path", status.path),
+        ]))
+    }
+
+    fn cmd_index_clean(&self, invocation: &Invocation) -> Result<String> {
+        let vault = self
+            .workspace
+            .open_vault(invocation.global.vault.as_deref())?;
+        let removed = crate::search_index::clean(&vault)?;
+        if invocation.param("format") == Some("json") {
+            return Ok(serde_json::to_string_pretty(
+                &json!({ "removed": removed }),
+            )?);
+        }
+        Ok(if removed {
+            "índice eliminado".to_string()
+        } else {
+            "no había índice para eliminar".to_string()
+        })
     }
 
     fn cmd_tags(&self, invocation: &Invocation) -> Result<String> {
