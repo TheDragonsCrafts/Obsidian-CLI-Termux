@@ -99,7 +99,7 @@ impl Workspace {
 
     pub fn save(&self) -> Result<()> {
         let body = serde_json::to_string_pretty(&self.state)?;
-        fs::write(&self.runtime.state_file, body)?;
+        atomic_write_bytes(&self.runtime.state_file, body.as_bytes())?;
         Ok(())
     }
 
@@ -769,7 +769,8 @@ fn build_cached_entry(
     abs: &Path,
 ) -> Result<CachedFileEntry> {
     let markdown = if is_markdown_path(abs) {
-        let text = fs::read_to_string(abs).unwrap_or_default();
+        let text = fs::read_to_string(abs)
+            .with_context(|| format!("no se pudo leer markdown cacheado: {}", abs.display()))?;
         Some(parse_markdown(&text))
     } else {
         None
@@ -1237,8 +1238,20 @@ fn read_cache(path: &Path) -> Result<StoredIndex> {
 }
 
 fn write_cache(path: &Path, cache: &StoredIndex) -> Result<()> {
-    let mut file = fs::File::create(path)?;
-    file.write_all(serde_json::to_string(cache)?.as_bytes())?;
+    atomic_write_bytes(path, serde_json::to_string(cache)?.as_bytes())?;
+    Ok(())
+}
+
+fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow!("ruta inválida para escritura atómica: {}", path.display()))?;
+    let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
+    tmp.write_all(bytes)?;
+    tmp.as_file().sync_all()?;
+    tmp.persist(path)
+        .map_err(|error| anyhow!(error.error))
+        .with_context(|| format!("no se pudo reemplazar {}", path.display()))?;
     Ok(())
 }
 
