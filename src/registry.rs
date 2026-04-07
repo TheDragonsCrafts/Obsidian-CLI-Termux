@@ -221,6 +221,24 @@ pub const COMMANDS: &[CommandSpec] = &[
         SupportLevel::Local,
     ),
     spec(
+        "index:build",
+        "Búsqueda",
+        "Construye/actualiza el índice full-text del vault",
+        SupportLevel::Local,
+    ),
+    spec(
+        "index:status",
+        "Búsqueda",
+        "Muestra metadatos del índice full-text",
+        SupportLevel::Local,
+    ),
+    spec(
+        "index:clean",
+        "Búsqueda",
+        "Elimina el índice full-text del vault",
+        SupportLevel::Local,
+    ),
+    spec(
         "search:open",
         "Búsqueda",
         "Abre la vista Search en la app",

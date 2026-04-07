@@ -1,6 +1,7 @@
 mod app;
 mod parser;
 mod registry;
+mod search_index;
 mod tui;
 mod updater;
 mod vault;
