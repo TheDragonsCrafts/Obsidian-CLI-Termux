@@ -254,7 +254,7 @@ fn validate_index(vault: &VaultContext, index: &StoredSearchIndex) -> Result<()>
 }
 
 fn candidate_paths(index: &StoredSearchIndex, query: &str) -> Vec<String> {
-    if query.len() < 3 {
+    if query.chars().count() < 3 {
         return index.files.keys().cloned().collect();
     }
     let grams = trigrams(query);
