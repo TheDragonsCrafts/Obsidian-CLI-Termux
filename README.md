@@ -7,6 +7,8 @@ obsidian vault=Main files
 obsidian read file=Inbox
 obsidian append file=Inbox content="hola\nmundo"
 obsidian search query="meeting notes" format=json
+obsidian index:build
+obsidian search query="meeting notes" engine=index format=json
 ```
 
 ## Objetivo
@@ -53,7 +55,37 @@ En otras palabras: el backend local sirve para automatización fuerte sobre el v
 
 - Resolución de vault por `vault=<name>`, por directorio actual o por estado persistido.
 - Índice incremental cacheado por vault para headings, tags, tasks, properties, aliases y wikilinks.
+- Índice full-text opcional tipo trigram para acelerar `search` y `search:context`.
 - TUI visual con navegador de comandos, sugerencias, historial persistente, scroll de salida y barra de comandos cuando se ejecuta `obsidian` sin subcomando.
+
+## Búsqueda indexada (`engine=scan|index|auto`)
+
+Los comandos `search` y `search:context` ahora aceptan `engine=...`:
+
+- `engine=scan` (default): mantiene el comportamiento histórico (escaneo lineal por archivo).
+- `engine=index`: fuerza el motor indexado. Si no hay índice o está inválido, devuelve error claro:
+  - `Índice no disponible; ejecuta obsidian index:build`
+- `engine=auto`: usa índice sólo si existe y está fresco; si no, hace fallback automático a `scan`.
+
+Comandos nuevos para gestionar índice:
+
+```bash
+obsidian index:build         # construye/actualiza índice full-text incremental
+obsidian index:status        # muestra versión, cantidad de archivos, bytes, fecha y ubicación
+obsidian index:clean         # elimina el índice full-text
+```
+
+Cuándo conviene `engine=index`:
+
+- Vaults medianos/grandes.
+- Búsquedas repetidas con palabras/frases de 3+ caracteres.
+- Casos donde `search:context` sobre muchos archivos tarda demasiado con scan lineal.
+
+Limitaciones conocidas:
+
+- El índice guarda contenido textual en JSON para priorizar portabilidad (no es el formato más compacto).
+- Para queries de menos de 3 caracteres la selectividad del trigram cae y se aproxima al costo de scan.
+- `engine=auto` valida frescura con `mtime` + `len`; cambios que preserven ambos metadatos no se detectan.
 
 
 ## Auto-update desde GitHub
