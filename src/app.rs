@@ -641,6 +641,7 @@ impl App {
             .or(invocation.global.vault.as_deref());
         let vault = self.workspace.open_or_init_vault(selector)?;
         self.workspace.set_active_vault(&vault);
+        self.workspace.state.active_file = None;
         Ok(vault.root.to_string_lossy().to_string())
     }
 

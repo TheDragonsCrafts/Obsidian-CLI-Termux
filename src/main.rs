@@ -53,8 +53,10 @@ fn run() -> Result<()> {
 }
 
 fn relaunch_after_update(args: &[String]) -> Result<()> {
-    let current_exe = std::env::current_exe()?;
-    let status = Command::new(current_exe).args(args).status()?;
+    let invoked_exe = std::env::args()
+        .next()
+        .unwrap_or_else(|| "obsidian".to_string());
+    let status = Command::new(invoked_exe).args(args).status()?;
     if status.success() {
         return Ok(());
     }
