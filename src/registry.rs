@@ -81,6 +81,12 @@ pub const COMMANDS: &[CommandSpec] = &[
         SupportLevel::Local,
     ),
     spec(
+        "vault:init",
+        "Vault",
+        "Inicializa un vault creando `.obsidian`",
+        SupportLevel::Local,
+    ),
+    spec(
         "file",
         "Archivos",
         "Información del archivo objetivo",

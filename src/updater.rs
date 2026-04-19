@@ -30,20 +30,26 @@ struct UpdateState {
     last_seen_version: Option<String>,
 }
 
-pub fn check_and_auto_update() -> Result<()> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoUpdateOutcome {
+    NoChange,
+    Updated,
+}
+
+pub fn check_and_auto_update() -> Result<AutoUpdateOutcome> {
     if std::env::var("OBSIDIAN_CLI_AUTO_UPDATE")
         .map(|value| value == "0" || value.eq_ignore_ascii_case("false"))
         .unwrap_or(false)
     {
-        return Ok(());
+        return Ok(AutoUpdateOutcome::NoChange);
     }
 
     if !should_check_now()? {
-        return Ok(());
+        return Ok(AutoUpdateOutcome::NoChange);
     }
     if UPDATE_CIRCUIT_OPEN.load(Ordering::Relaxed) {
         eprintln!("Auto-update omitido: circuito abierto por fallos previos en esta sesión.");
-        return Ok(());
+        return Ok(AutoUpdateOutcome::NoChange);
     }
 
     let configured_repo = configured_repo();
@@ -70,32 +76,33 @@ pub fn check_and_auto_update() -> Result<()> {
         if auto_apply_enabled() {
             run_self_update(&repo, None)?;
             eprintln!("Auto-update completado. Reinicia el comando para usar la versión nueva.");
+            return Ok(AutoUpdateOutcome::Updated);
         } else {
             eprintln!(
                 "Auto-update disponible, pero en modo seguro (solo check). Ejecuta `update` para aplicar."
             );
         }
-        return Ok(());
+        return Ok(AutoUpdateOutcome::NoChange);
     };
 
     write_state(Some(latest.clone()))?;
 
     if !is_newer(&latest, env!("CARGO_PKG_VERSION"))? {
-        return Ok(());
+        return Ok(AutoUpdateOutcome::NoChange);
     }
 
     if !auto_apply_enabled() {
         eprintln!(
             "Nueva versión detectada ({latest}). Modo seguro activo: no se aplica automáticamente. Ejecuta `update` para confirmar."
         );
-        return Ok(());
+        return Ok(AutoUpdateOutcome::NoChange);
     }
 
     eprintln!("Nueva versión detectada ({latest}). Intentando auto-update desde GitHub...");
     run_self_update(&repo, None)?;
     eprintln!("Auto-update completado. Reinicia el comando para usar la versión nueva.");
 
-    Ok(())
+    Ok(AutoUpdateOutcome::Updated)
 }
 
 pub fn manual_update(force: bool, language: &str) -> Result<String> {

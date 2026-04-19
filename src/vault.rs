@@ -114,6 +114,27 @@ impl Workspace {
         Ok(VaultContext::new(self.runtime.clone(), vault))
     }
 
+    pub fn open_or_init_vault(&self, selector: Option<&str>) -> Result<VaultContext> {
+        match self.open_vault(selector) {
+            Ok(vault) => Ok(vault),
+            Err(error) => {
+                let Some(raw_selector) = selector else {
+                    return Err(error);
+                };
+                if !is_path_like_selector(raw_selector) {
+                    return Err(error);
+                }
+                let path = PathBuf::from(raw_selector);
+                fs::create_dir_all(path.join(".obsidian"))?;
+                let vault = KnownVault {
+                    name: vault_name(&path),
+                    path: path.to_string_lossy().to_string(),
+                };
+                Ok(VaultContext::new(self.runtime.clone(), vault))
+            }
+        }
+    }
+
     pub fn resolve_vault(&self, selector: Option<&str>) -> Result<KnownVault> {
         if let Some(selector) = selector {
             return self.match_vault(selector);
@@ -1355,6 +1376,14 @@ fn find_vault_ancestor(path: &Path) -> Option<PathBuf> {
     None
 }
 
+fn is_path_like_selector(value: &str) -> bool {
+    value.contains('/')
+        || value.contains('\\')
+        || value.starts_with('.')
+        || value.starts_with('~')
+        || Path::new(value).is_absolute()
+}
+
 pub fn moment_to_chrono(value: &str) -> String {
     let replacements = [
         ("YYYY", "%Y"),
@@ -1422,8 +1451,8 @@ pub fn count_bytes(records: &[FileRecord]) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_template_tokens, discover_vaults_under_roots, moment_to_chrono, normalize_rel_path,
-        parse_markdown,
+        RuntimePaths, SessionState, Workspace, apply_template_tokens, discover_vaults_under_roots,
+        moment_to_chrono, normalize_rel_path, parse_markdown,
     };
 
     #[test]
@@ -1529,5 +1558,70 @@ mod tests {
         let template = "{{title}} - {{title}}";
         let result = apply_template_tokens(template, Some("Double"));
         assert_eq!(result, "Double - Double");
+    }
+
+    #[test]
+    fn open_or_init_vault_creates_obsidian_folder_for_path_selector() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("obsidian-cli-init-vault-{stamp}"));
+        let runtime = RuntimePaths {
+            base_dir: root.join("runtime"),
+            cache_dir: root.join("runtime").join("cache"),
+            state_file: root.join("runtime").join("state.json"),
+            history_file: root.join("runtime").join("history.txt"),
+        };
+        let workspace = Workspace {
+            cwd: root.clone(),
+            runtime,
+            known_vaults: Vec::new(),
+            state: SessionState::default(),
+            dirty: false,
+        };
+
+        let target = root.join("NewVault");
+        let selector = target.to_string_lossy().to_string();
+        let vault = workspace.open_or_init_vault(Some(&selector)).unwrap();
+
+        assert!(target.join(".obsidian").is_dir());
+        assert_eq!(vault.root, target);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn append_inserts_newline_when_missing() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("obsidian-cli-append-{stamp}"));
+        let vault_root = root.join("Vault");
+        std::fs::create_dir_all(vault_root.join(".obsidian")).unwrap();
+        let file = vault_root.join("Inbox.md");
+        std::fs::write(&file, "Hola Mundo").unwrap();
+
+        let runtime = RuntimePaths {
+            base_dir: root.join("runtime"),
+            cache_dir: root.join("runtime").join("cache"),
+            state_file: root.join("runtime").join("state.json"),
+            history_file: root.join("runtime").join("history.txt"),
+        };
+        let workspace = Workspace {
+            cwd: root.clone(),
+            runtime,
+            known_vaults: Vec::new(),
+            state: SessionState::default(),
+            dirty: false,
+        };
+        let vault = workspace.open_vault(Some(&vault_root.to_string_lossy())).unwrap();
+        vault.append_text("Inbox.md", "Nuevo texto", false).unwrap();
+
+        let content = std::fs::read_to_string(file).unwrap();
+        assert_eq!(content, "Hola Mundo\nNuevo texto");
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
