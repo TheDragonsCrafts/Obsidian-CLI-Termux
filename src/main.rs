@@ -5,7 +5,7 @@ mod tui;
 mod updater;
 mod vault;
 
-use std::process::ExitCode;
+use std::process::{Command, ExitCode};
 
 use anyhow::Result;
 
@@ -23,11 +23,20 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<()> {
-    if let Err(error) = updater::check_and_auto_update() {
-        eprintln!("Auto-update omitido: {error:#}");
+    let args = std::env::args().skip(1).collect::<Vec<_>>();
+    let mut auto_updated = false;
+    match updater::check_and_auto_update() {
+        Ok(updater::AutoUpdateOutcome::Updated) => auto_updated = true,
+        Ok(updater::AutoUpdateOutcome::NoChange) => {}
+        Err(error) => {
+            eprintln!("Auto-update omitido: {error:#}");
+        }
     }
 
-    let args = std::env::args().skip(1).collect::<Vec<_>>();
+    if auto_updated {
+        return relaunch_after_update(&args);
+    }
+
     let mut app = App::load()?;
 
     match parse(&args)? {
@@ -41,4 +50,13 @@ fn run() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn relaunch_after_update(args: &[String]) -> Result<()> {
+    let current_exe = std::env::current_exe()?;
+    let status = Command::new(current_exe).args(args).status()?;
+    if status.success() {
+        return Ok(());
+    }
+    std::process::exit(status.code().unwrap_or(1));
 }

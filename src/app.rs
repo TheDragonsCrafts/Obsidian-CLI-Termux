@@ -37,6 +37,7 @@ impl App {
             "update" => self.cmd_update(&invocation)?,
             "language" => self.cmd_language(&invocation)?,
             "vault" => self.cmd_vault(&invocation)?,
+            "vault:init" => self.cmd_vault_init(&invocation)?,
             "vaults" => self.cmd_vaults(&invocation)?,
             "vault:open" => self.cmd_vault_open(&invocation)?,
             "file" => self.cmd_file(&invocation)?,
@@ -118,6 +119,27 @@ impl App {
 
         self.workspace.save_if_dirty()?;
         Ok(output)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    use super::create_target_path;
+    use crate::parser::{GlobalOptions, Invocation};
+
+    #[test]
+    fn create_accepts_file_alias_for_name() {
+        let invocation = Invocation {
+            command: "create".to_string(),
+            params: BTreeMap::from([("file".to_string(), "Inbox".to_string())]),
+            flags: BTreeSet::new(),
+            positionals: Vec::new(),
+            global: GlobalOptions::default(),
+        };
+        let path = create_target_path(&invocation).unwrap();
+        assert_eq!(path, "Inbox.md");
     }
 }
 
@@ -331,7 +353,10 @@ fn create_target_path(invocation: &Invocation) -> Result<String> {
     if let Some(path) = invocation.param("path") {
         return Ok(normalize_rel_path(path));
     }
-    let name = required_param(invocation, "name")?;
+    let name = invocation
+        .param("name")
+        .or_else(|| invocation.param("file"))
+        .ok_or_else(|| anyhow!("faltó `name=...` (también acepta `file=...`)"))?;
     let mut path = normalize_rel_path(name);
     if Path::new(&path).extension().is_none() {
         path.push_str(".md");
@@ -609,6 +634,16 @@ impl App {
         })
     }
 
+    fn cmd_vault_init(&mut self, invocation: &Invocation) -> Result<String> {
+        let selector = invocation
+            .param("path")
+            .or(invocation.param("name"))
+            .or(invocation.global.vault.as_deref());
+        let vault = self.workspace.open_or_init_vault(selector)?;
+        self.workspace.set_active_vault(&vault);
+        Ok(vault.root.to_string_lossy().to_string())
+    }
+
     fn cmd_vaults(&self, invocation: &Invocation) -> Result<String> {
         let mut vaults = self.workspace.known_vaults.clone();
         if vaults.is_empty()
@@ -750,7 +785,7 @@ impl App {
     fn cmd_create(&mut self, invocation: &Invocation) -> Result<String> {
         let vault = self
             .workspace
-            .open_vault(invocation.global.vault.as_deref())?;
+            .open_or_init_vault(invocation.global.vault.as_deref())?;
         let rel = create_target_path(invocation)?;
         let mut content = invocation.param("content").unwrap_or_default().to_string();
         if let Some(template) = invocation.param("template") {
