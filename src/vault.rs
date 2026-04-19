@@ -1616,7 +1616,9 @@ mod tests {
             state: SessionState::default(),
             dirty: false,
         };
-        let vault = workspace.open_vault(Some(&vault_root.to_string_lossy())).unwrap();
+        let vault = workspace
+            .open_vault(Some(&vault_root.to_string_lossy()))
+            .unwrap();
         vault.append_text("Inbox.md", "Nuevo texto", false).unwrap();
 
         let content = std::fs::read_to_string(file).unwrap();
