@@ -29,7 +29,7 @@ static TAG_RE: Lazy<Regex> = Lazy::new(|| {
         .expect("tag regex")
 });
 const INDEX_CACHE_VERSION: u32 = 2;
-const KNOWN_VAULTS_CACHE_VERSION: u32 = 2;
+const KNOWN_VAULTS_CACHE_VERSION: u32 = 3;
 
 #[derive(Debug, Clone)]
 pub struct RuntimePaths {
@@ -88,9 +88,7 @@ impl Workspace {
             SessionState::default()
         };
 
-        let mut known_vaults = discover_known_vaults(&runtime);
-        known_vaults.sort_by(|left, right| left.name.cmp(&right.name));
-        known_vaults.dedup_by(|left, right| left.path == right.path);
+        let known_vaults = normalize_known_vaults(discover_known_vaults(&runtime));
 
         Ok(Self {
             cwd,
@@ -117,9 +115,7 @@ impl Workspace {
             fs::remove_file(cache_file)?;
         }
         fs::create_dir_all(&self.runtime.cache_dir)?;
-        let mut known_vaults = discover_known_vaults_uncached();
-        known_vaults.sort_by(|left, right| left.name.cmp(&right.name));
-        known_vaults.dedup_by(|left, right| left.path == right.path);
+        let known_vaults = normalize_known_vaults(discover_known_vaults_uncached());
 
         let cache = KnownVaultsCache {
             version: KNOWN_VAULTS_CACHE_VERSION,
@@ -1236,7 +1232,32 @@ fn load_known_vaults_cache(path: &Path) -> Option<Vec<KnownVault>> {
     if now.saturating_sub(scanned) > Duration::from_secs(60 * 60 * 6) {
         return None;
     }
-    Some(cache.vaults)
+    Some(normalize_known_vaults(cache.vaults))
+}
+
+fn normalize_known_vaults(vaults: Vec<KnownVault>) -> Vec<KnownVault> {
+    let mut normalized = Vec::new();
+    let mut seen = BTreeSet::new();
+
+    for vault in vaults {
+        let path = canonical_or_self(&vault.path_buf());
+        let key = path.to_string_lossy().to_string();
+        if !seen.insert(key.clone()) {
+            continue;
+        }
+
+        normalized.push(KnownVault {
+            name: vault.name,
+            path: key,
+        });
+    }
+
+    normalized.sort_by(|left, right| {
+        left.name
+            .cmp(&right.name)
+            .then_with(|| left.path.cmp(&right.path))
+    });
+    normalized
 }
 
 fn discover_known_vaults_uncached() -> Vec<KnownVault> {
@@ -1612,6 +1633,45 @@ mod tests {
 
         assert!(found.contains(&vault));
         assert!(found.contains(&nested));
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn normalizes_known_vaults_before_deduplicating() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("obsidian-cli-vault-dedup-{stamp}"));
+        let target = root.join("Documents").join("Main");
+        let alias_root = root.join("Alias");
+        let alias = alias_root.join("Main");
+
+        std::fs::create_dir_all(target.join(".obsidian")).unwrap();
+        std::fs::create_dir_all(&alias_root).unwrap();
+
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&target, &alias).unwrap();
+
+            let vaults = super::normalize_known_vaults(vec![
+                KnownVault {
+                    name: "Main".to_string(),
+                    path: target.to_string_lossy().to_string(),
+                },
+                KnownVault {
+                    name: "Main".to_string(),
+                    path: alias.to_string_lossy().to_string(),
+                },
+            ]);
+
+            assert_eq!(vaults.len(), 1);
+            assert_eq!(
+                vaults[0].path,
+                target.canonicalize().unwrap().to_string_lossy()
+            );
+        }
 
         std::fs::remove_dir_all(root).unwrap();
     }
