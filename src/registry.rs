@@ -734,6 +734,20 @@ pub fn overview(language: &str) -> String {
             out.push_str("] ");
             out.push_str(spec.summary);
             out.push('\n');
+            out.push_str("    ");
+            out.push_str(if language == "en" { "usage: " } else { "uso: " });
+            out.push_str(command_usage(spec.name));
+            if let Some(aliases) = command_aliases(spec.name) {
+                out.push('\n');
+                out.push_str("    ");
+                out.push_str(if language == "en" {
+                    "aliases: "
+                } else {
+                    "alias: "
+                });
+                out.push_str(aliases);
+            }
+            out.push('\n');
         }
         out.push('\n');
     }
@@ -743,8 +757,8 @@ pub fn overview(language: &str) -> String {
 
 pub fn command_help(name: &str, language: &str) -> Option<String> {
     let spec = find(name)?;
-    Some(format!(
-        "{name}\n{}: {}\n{}: [{}]\n{}: {}",
+    let mut out = format!(
+        "{name}\n{}: {}\n{}: [{}]\n{}: {}\n{}: {}",
         if language == "en" {
             "category"
         } else {
@@ -762,8 +776,136 @@ pub fn command_help(name: &str, language: &str) -> Option<String> {
         } else {
             "resumen"
         },
-        spec.summary
-    ))
+        spec.summary,
+        if language == "en" { "usage" } else { "uso" },
+        command_usage(name)
+    );
+    if let Some(aliases) = command_aliases(name) {
+        out.push('\n');
+        out.push_str(if language == "en" { "aliases" } else { "alias" });
+        out.push_str(": ");
+        out.push_str(aliases);
+    }
+    Some(out)
+}
+
+pub fn command_usage(name: &str) -> &'static str {
+    match name {
+        "help" => "obsidian help [<comando>|command=<comando>]",
+        "version" => "obsidian version",
+        "update" => "obsidian update [force]",
+        "language" => "obsidian language [set=<es|en>|lang=<es|en>]",
+        "commands" => {
+            "obsidian commands [format=json|csv|tsv] [support=local|hybrid|bridge] [category=<cat>]"
+        }
+        "doctor" => "obsidian doctor",
+        "vault" => "obsidian vault [info=name|path|files|folders|size] [format=json]",
+        "vaults" => "obsidian vaults [refresh] [verbose|total] [format=json]",
+        "vault:open" => "obsidian vault:open name=<vault>",
+        "vault:init" => "obsidian vault:init path=<ruta>",
+        "file" => "obsidian file file=<nota>|path=<ruta> [format=json]",
+        "files" => "obsidian files [folder=<carpeta>] [ext=<ext>] [total] [format=json|csv|tsv]",
+        "folder" => "obsidian folder path=<carpeta> [format=json]",
+        "folders" => "obsidian folders [folder=<carpeta>] [total] [format=json]",
+        "open" => "obsidian open file=<nota>|path=<ruta>",
+        "create" => "obsidian create name=<nota>|file=<nota> [content=<texto>] [overwrite]",
+        "read" => "obsidian read file=<nota>|path=<ruta>",
+        "append" => "obsidian append file=<nota>|path=<ruta> content=<texto> [inline]",
+        "prepend" => "obsidian prepend file=<nota>|path=<ruta> content=<texto> [inline]",
+        "move" => "obsidian move file=<nota>|path=<ruta> to=<ruta>",
+        "rename" => "obsidian rename file=<nota>|path=<ruta> name=<nuevo_nombre>",
+        "delete" => "obsidian delete file=<nota>|path=<ruta> [permanent]",
+        "links" => "obsidian links file=<nota>|path=<ruta> [format=json|csv|tsv]",
+        "backlinks" => "obsidian backlinks file=<nota>|path=<ruta> [format=json|csv|tsv]",
+        "unresolved" => "obsidian unresolved [total] [format=json|csv|tsv]",
+        "orphans" => "obsidian orphans [total] [format=json]",
+        "deadends" => "obsidian deadends [total] [format=json]",
+        "outline" => "obsidian outline file=<nota>|path=<ruta> [format=json]",
+        "daily" => "obsidian daily",
+        "daily:path" => "obsidian daily:path",
+        "daily:read" => "obsidian daily:read",
+        "daily:append" => "obsidian daily:append content=<texto> [inline]",
+        "daily:prepend" => "obsidian daily:prepend content=<texto> [inline]",
+        "search" => "obsidian search query=<texto> [path=<carpeta>] [limit=<n>] [format=json]",
+        "search:context" => {
+            "obsidian search:context query=<texto> [path=<carpeta>] [limit=<n>] [format=json|csv|tsv]"
+        }
+        "tags" => {
+            "obsidian tags [file=<nota>|path=<ruta>|active] [sort=count] [total] [format=json]"
+        }
+        "tag" => "obsidian tag name=<tag> [total] [format=json]",
+        "tasks" => {
+            "obsidian tasks [file=<nota>|path=<ruta>|active|daily] [status=<x| >] [format=json]"
+        }
+        "task" => {
+            "obsidian task ref=<path:line>|file=<nota> line=<n> [toggle|done|todo|status=<s>]"
+        }
+        "aliases" => {
+            "obsidian aliases [file=<nota>|path=<ruta>|active] [total] [format=json|csv|tsv]"
+        }
+        "properties" => {
+            "obsidian properties [file=<nota>|path=<ruta>|active] [name=<prop>] [format=json|yaml|csv|tsv]"
+        }
+        "property:set" => {
+            "obsidian property:set file=<nota>|path=<ruta> name=<prop> value=<valor> [type=string|number|bool|json]"
+        }
+        "property:remove" => "obsidian property:remove file=<nota>|path=<ruta> name=<prop>",
+        "property:read" => {
+            "obsidian property:read file=<nota>|path=<ruta> name=<prop> [format=json]"
+        }
+        "templates" => "obsidian templates [format=json]",
+        "template:read" => "obsidian template:read name=<template> [title=<titulo>]",
+        "template:insert" => {
+            "obsidian template:insert name=<template> [file=<nota>|path=<ruta>|active] [title=<titulo>]"
+        }
+        "bases" => "obsidian bases [format=json]",
+        "base:views" => "obsidian base:views file=<base>|path=<ruta> [format=json]",
+        "base:query" => "obsidian base:query file=<base>|path=<ruta> [view=<vista>] [format=json]",
+        "bookmarks" => "obsidian bookmarks [format=json]",
+        "bookmark" => "obsidian bookmark file=<nota>|path=<ruta> [title=<texto>]",
+        "plugins" => "obsidian plugins [filter=community|core] [verbose] [format=json]",
+        "plugins:enabled" => "obsidian plugins:enabled [filter=community|core] [format=json]",
+        "plugin" => "obsidian plugin id=<plugin_id> [format=json]",
+        "plugin:enable" => "obsidian plugin:enable id=<plugin_id> [filter=community|core]",
+        "plugin:disable" => "obsidian plugin:disable id=<plugin_id> [filter=community|core]",
+        "plugin:uninstall" => "obsidian plugin:uninstall id=<plugin_id>",
+        "themes" => "obsidian themes [format=json]",
+        "theme" => "obsidian theme [name=<tema>] [format=json]",
+        "theme:set" => "obsidian theme:set name=<tema>",
+        "theme:uninstall" => "obsidian theme:uninstall name=<tema>",
+        "snippets" => "obsidian snippets [format=json]",
+        "snippets:enabled" => "obsidian snippets:enabled [format=json]",
+        "snippet:enable" => "obsidian snippet:enable name=<snippet>",
+        "snippet:disable" => "obsidian snippet:disable name=<snippet>",
+        "random" => "obsidian random [format=json]",
+        "random:read" => "obsidian random:read",
+        "recents" => "obsidian recents [total] [format=json]",
+        "wordcount" => "obsidian wordcount file=<nota>|path=<ruta> [format=json]",
+        "web" => "obsidian web url=<https://...>",
+        "reload" | "restart" | "search:open" | "base:create" | "plugin:install"
+        | "plugin:reload" | "theme:install" | "diff" | "history" | "history:list"
+        | "history:read" | "history:restore" | "history:open" | "sync" | "sync:status"
+        | "sync:history" | "sync:read" | "sync:restore" | "sync:open" | "sync:deleted"
+        | "publish:site" | "publish:list" | "publish:status" | "publish:add" | "publish:remove"
+        | "publish:open" | "workspace" | "workspaces" | "workspace:save" | "workspace:load"
+        | "workspace:delete" | "tabs" | "tab:open" | "devtools" | "dev:debug" | "dev:cdp"
+        | "dev:errors" | "dev:screenshot" | "dev:console" | "dev:css" | "dev:dom"
+        | "dev:mobile" | "eval" => {
+            "obsidian <comando> [param=value] [flags] (requiere bridge/plugin cuando soporte=[bridge])"
+        }
+        _ => "obsidian <comando> [param=value] [flags]",
+    }
+}
+
+pub fn command_aliases(name: &str) -> Option<&'static str> {
+    match name {
+        "rename" => Some("to=<nuevo_nombre> equivale a name=<nuevo_nombre>"),
+        "properties" => Some("key=<prop> equivale a name=<prop>"),
+        "property:set" | "property:remove" | "property:read" => {
+            Some("key=<prop> equivale a name=<prop>")
+        }
+        _ => None,
+    }
 }
 
 pub fn localize_category(category: &str, language: &str) -> String {

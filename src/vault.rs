@@ -28,6 +28,8 @@ static TAG_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?:^|[^[:alnum:]_/])(?P<tag>#(?:[[:alnum:]_-]+(?:/[[:alnum:]_-]+)*))")
         .expect("tag regex")
 });
+const INDEX_CACHE_VERSION: u32 = 2;
+const KNOWN_VAULTS_CACHE_VERSION: u32 = 2;
 
 #[derive(Debug, Clone)]
 pub struct RuntimePaths {
@@ -120,7 +122,7 @@ impl Workspace {
         known_vaults.dedup_by(|left, right| left.path == right.path);
 
         let cache = KnownVaultsCache {
-            version: 1,
+            version: KNOWN_VAULTS_CACHE_VERSION,
             scanned_at_ms: to_millis(Some(SystemTime::now())),
             vaults: known_vaults.clone(),
         };
@@ -321,9 +323,9 @@ impl VaultContext {
         let ext = ext.map(|value| value.trim_start_matches('.').to_ascii_lowercase());
         let mut files = Vec::new();
 
-        for entry in WalkDir::new(root)
+        for entry in WalkDir::new(&root)
             .into_iter()
-            .filter_entry(|entry| should_walk(entry.path()))
+            .filter_entry(|entry| should_walk_entry(&root, entry.path()))
         {
             let entry = entry?;
             if !entry.file_type().is_file() {
@@ -364,10 +366,10 @@ impl VaultContext {
         }
 
         let mut folders = BTreeSet::new();
-        for entry in WalkDir::new(root)
+        for entry in WalkDir::new(&root)
             .min_depth(1)
             .into_iter()
-            .filter_entry(|entry| should_walk(entry.path()))
+            .filter_entry(|entry| should_walk_entry(&root, entry.path()))
         {
             let entry = entry?;
             if entry.file_type().is_dir() {
@@ -495,7 +497,7 @@ impl VaultContext {
 
         for entry in WalkDir::new(&self.root)
             .into_iter()
-            .filter_entry(|entry| should_walk(entry.path()))
+            .filter_entry(|entry| should_walk_entry(&self.root, entry.path()))
         {
             let entry = entry?;
             if !entry.file_type().is_file() {
@@ -524,7 +526,7 @@ impl VaultContext {
 
         next_entries.sort_by(|left, right| left.rel_path.cmp(&right.rel_path));
         let stored = StoredIndex {
-            version: 1,
+            version: INDEX_CACHE_VERSION,
             files: next_entries.clone(),
         };
         write_cache(&self.cache_file, &stored)?;
@@ -788,6 +790,8 @@ pub struct MarkdownMeta {
     pub character_count: usize,
     #[serde(default)]
     pub search_blob: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frontmatter_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -827,7 +831,7 @@ fn build_cached_entry(
     let markdown = if is_markdown_path(abs) {
         let text = fs::read_to_string(abs)
             .with_context(|| format!("no se pudo leer markdown cacheado: {}", abs.display()))?;
-        Some(parse_markdown(&text))
+        Some(parse_markdown_with_source(&text, rel_path))
     } else {
         None
     };
@@ -840,7 +844,16 @@ fn build_cached_entry(
     })
 }
 
+#[cfg(test)]
 pub fn parse_markdown(text: &str) -> MarkdownMeta {
+    parse_markdown_inner(text, None)
+}
+
+fn parse_markdown_with_source(text: &str, source: &str) -> MarkdownMeta {
+    parse_markdown_inner(text, Some(source))
+}
+
+fn parse_markdown_inner(text: &str, source: Option<&str>) -> MarkdownMeta {
     let (frontmatter, body) = split_frontmatter(text);
     let mut headings = Vec::new();
     let mut tasks = Vec::new();
@@ -910,32 +923,41 @@ pub fn parse_markdown(text: &str) -> MarkdownMeta {
 
     let mut properties = BTreeMap::new();
     let mut aliases = Vec::new();
+    let mut frontmatter_error = None;
     if let Some(frontmatter) = frontmatter.as_deref() {
         let yaml_frontmatter = frontmatter
             .trim_start_matches("---\n")
             .trim_end_matches("\n---\n")
             .trim_end_matches("\n...\n");
-        if let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(yaml_frontmatter)
-            && let Some(mapping) = value.as_mapping()
-        {
-            for (key, value) in mapping {
-                if let Some(key) = key.as_str() {
-                    let json_value = serde_json::to_value(value).unwrap_or(Value::Null);
-                    if key == "aliases" || key == "alias" {
-                        aliases.extend(value_to_strings(&json_value));
-                    }
-                    if key == "tags" {
-                        for tag in value_to_strings(&json_value) {
-                            let next = if tag.starts_with('#') {
-                                tag
-                            } else {
-                                format!("#{tag}")
-                            };
-                            tags.insert(next);
+        match serde_yaml::from_str::<serde_yaml::Value>(yaml_frontmatter) {
+            Ok(value) => {
+                if let Some(mapping) = value.as_mapping() {
+                    for (key, value) in mapping {
+                        if let Some(key) = key.as_str() {
+                            let json_value = serde_json::to_value(value).unwrap_or(Value::Null);
+                            if key == "aliases" || key == "alias" {
+                                aliases.extend(value_to_strings(&json_value));
+                            }
+                            if key == "tags" {
+                                for tag in value_to_strings(&json_value) {
+                                    let next = if tag.starts_with('#') {
+                                        tag
+                                    } else {
+                                        format!("#{tag}")
+                                    };
+                                    tags.insert(next);
+                                }
+                            }
+                            properties.insert(key.to_string(), json_value);
                         }
                     }
-                    properties.insert(key.to_string(), json_value);
                 }
+            }
+            Err(error) => {
+                let target = source.unwrap_or("markdown");
+                let message = error.to_string();
+                eprintln!("[warn] frontmatter inválido en {target}: {message}");
+                frontmatter_error = Some(message);
             }
         }
     }
@@ -950,6 +972,7 @@ pub fn parse_markdown(text: &str) -> MarkdownMeta {
         word_count: body.split_whitespace().count(),
         character_count: body.chars().count(),
         search_blob: body.to_ascii_lowercase(),
+        frontmatter_error,
     }
 }
 
@@ -1189,7 +1212,7 @@ fn discover_known_vaults(runtime: &RuntimePaths) -> Vec<KnownVault> {
 
     let known = discover_known_vaults_uncached();
     let cache = KnownVaultsCache {
-        version: 1,
+        version: KNOWN_VAULTS_CACHE_VERSION,
         scanned_at_ms: to_millis(Some(SystemTime::now())),
         vaults: known.clone(),
     };
@@ -1205,7 +1228,7 @@ fn load_known_vaults_cache(path: &Path) -> Option<Vec<KnownVault>> {
     }
     let text = fs::read_to_string(path).ok()?;
     let cache = serde_json::from_str::<KnownVaultsCache>(&text).ok()?;
-    if cache.version != 1 {
+    if cache.version != KNOWN_VAULTS_CACHE_VERSION {
         return None;
     }
     let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?;
@@ -1262,14 +1285,19 @@ fn discover_known_vaults_uncached() -> Vec<KnownVault> {
 }
 
 fn push_known_vault(known: &mut Vec<KnownVault>, path: &Path) {
+    let path = canonical_or_self(path);
     let path_str = path.to_string_lossy().to_string();
     if known.iter().any(|vault| vault.path == path_str) {
         return;
     }
     known.push(KnownVault {
-        name: vault_name(path),
+        name: vault_name(&path),
         path: path_str,
     });
+}
+
+fn canonical_or_self(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }
 
 fn discover_documents_vaults() -> Vec<PathBuf> {
@@ -1306,6 +1334,7 @@ fn discover_vaults_under_roots(roots: &[PathBuf]) -> Vec<PathBuf> {
             .follow_links(false)
             .max_depth(3)
             .into_iter()
+            .filter_entry(|entry| should_walk_entry(root, entry.path()))
             .filter_map(Result::ok)
         {
             if !entry.file_type().is_dir() {
@@ -1317,7 +1346,7 @@ fn discover_vaults_under_roots(roots: &[PathBuf]) -> Vec<PathBuf> {
                 continue;
             }
 
-            let key = candidate.to_string_lossy().to_string();
+            let key = canonical_or_self(candidate).to_string_lossy().to_string();
             if seen.insert(key) {
                 vaults.push(candidate.to_path_buf());
             }
@@ -1330,7 +1359,7 @@ fn discover_vaults_under_roots(roots: &[PathBuf]) -> Vec<PathBuf> {
 fn read_cache(path: &Path) -> Result<StoredIndex> {
     let text = fs::read_to_string(path)?;
     let stored = serde_json::from_str::<StoredIndex>(&text)?;
-    if stored.version != 1 {
+    if stored.version != INDEX_CACHE_VERSION {
         bail!("cache version incompatible");
     }
     Ok(stored)
@@ -1367,9 +1396,16 @@ fn vault_name(path: &Path) -> String {
         .to_string()
 }
 
+fn should_walk_entry(root: &Path, path: &Path) -> bool {
+    if path == root {
+        return true;
+    }
+    should_walk(path)
+}
+
 fn should_walk(path: &Path) -> bool {
     let file_name = path.file_name().and_then(OsStr::to_str).unwrap_or_default();
-    if file_name == ".obsidian" || file_name == ".git" || file_name == "node_modules" {
+    if file_name == "node_modules" || file_name.starts_with('.') {
         return false;
     }
     true
@@ -1477,8 +1513,8 @@ pub fn count_bytes(records: &[FileRecord]) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        RuntimePaths, SessionState, Workspace, apply_template_tokens, discover_vaults_under_roots,
-        moment_to_chrono, normalize_rel_path, parse_markdown,
+        KnownVault, RuntimePaths, SessionState, VaultContext, Workspace, apply_template_tokens,
+        discover_vaults_under_roots, moment_to_chrono, normalize_rel_path, parse_markdown,
     };
 
     #[test]
@@ -1492,6 +1528,14 @@ mod tests {
         assert!(meta.tags.contains(&"#tag".to_string()));
         assert!(meta.aliases.contains(&"Hola".to_string()));
         assert!(meta.tags.contains(&"#termux".to_string()));
+    }
+
+    #[test]
+    fn invalid_frontmatter_is_recorded() {
+        let meta = parse_markdown("---\ntags: [broken\n---\n# Title\n");
+
+        assert!(meta.frontmatter_error.is_some());
+        assert!(meta.properties.is_empty());
     }
 
     #[test]
@@ -1568,6 +1612,51 @@ mod tests {
 
         assert!(found.contains(&vault));
         assert!(found.contains(&nested));
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn vault_walks_ignore_hidden_directories_by_default() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("obsidian-cli-hidden-walk-{stamp}"));
+        let vault_root = root.join("Vault");
+        std::fs::create_dir_all(vault_root.join(".obsidian")).unwrap();
+        std::fs::create_dir_all(vault_root.join(".trash")).unwrap();
+        std::fs::create_dir_all(vault_root.join(".git")).unwrap();
+        std::fs::create_dir_all(vault_root.join(".hidden")).unwrap();
+        std::fs::write(vault_root.join("Visible.md"), "ok").unwrap();
+        std::fs::write(vault_root.join(".trash").join("Deleted.md"), "trash").unwrap();
+        std::fs::write(vault_root.join(".git").join("Ghost.md"), "git").unwrap();
+        std::fs::write(vault_root.join(".hidden").join("Secret.md"), "hidden").unwrap();
+
+        let runtime = RuntimePaths {
+            base_dir: root.join("runtime"),
+            cache_dir: root.join("runtime").join("cache"),
+            state_file: root.join("runtime").join("state.json"),
+            history_file: root.join("runtime").join("history.txt"),
+        };
+        std::fs::create_dir_all(&runtime.cache_dir).unwrap();
+        let vault = VaultContext::new(
+            runtime,
+            KnownVault {
+                name: "Vault".to_string(),
+                path: vault_root.to_string_lossy().to_string(),
+            },
+        );
+
+        let files = vault.list_files(None, Some("md")).unwrap();
+        let paths = files
+            .iter()
+            .map(|file| file.rel_path.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(paths, vec!["Visible.md"]);
+
+        let trash_files = vault.list_files(Some(".trash"), Some("md")).unwrap();
+        assert_eq!(trash_files[0].rel_path, ".trash/Deleted.md");
 
         std::fs::remove_dir_all(root).unwrap();
     }

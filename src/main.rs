@@ -5,7 +5,7 @@ mod tui;
 mod updater;
 mod vault;
 
-use std::io::IsTerminal;
+use std::io::{self, ErrorKind, IsTerminal, Write};
 use std::process::{Command, ExitCode};
 
 use anyhow::Result;
@@ -47,12 +47,21 @@ fn run() -> Result<()> {
         Request::Invocation(invocation) => {
             let output = app.execute(invocation)?;
             if !output.is_empty() {
-                println!("{output}");
+                write_stdout_line(&output)?;
             }
         }
     }
 
     Ok(())
+}
+
+fn write_stdout_line(output: &str) -> Result<()> {
+    let mut stdout = io::stdout().lock();
+    match writeln!(stdout, "{output}") {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == ErrorKind::BrokenPipe => Ok(()),
+        Err(error) => Err(error.into()),
+    }
 }
 
 fn relaunch_after_update(args: &[String]) -> Result<()> {

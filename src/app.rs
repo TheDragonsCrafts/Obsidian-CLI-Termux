@@ -129,7 +129,7 @@ impl App {
 mod tests {
     use std::collections::{BTreeMap, BTreeSet};
 
-    use super::create_target_path;
+    use super::{create_target_path, required_param_any};
     use crate::parser::{GlobalOptions, Invocation};
 
     #[test]
@@ -143,6 +143,22 @@ mod tests {
         };
         let path = create_target_path(&invocation).unwrap();
         assert_eq!(path, "Inbox.md");
+    }
+
+    #[test]
+    fn required_param_any_accepts_aliases() {
+        let invocation = Invocation {
+            command: "rename".to_string(),
+            params: BTreeMap::from([("to".to_string(), "Nuevo".to_string())]),
+            flags: BTreeSet::new(),
+            positionals: Vec::new(),
+            global: GlobalOptions::default(),
+        };
+
+        assert_eq!(
+            required_param_any(&invocation, &["name", "to"]).unwrap(),
+            "Nuevo"
+        );
     }
 }
 
@@ -190,6 +206,27 @@ fn required_param<'a>(invocation: &'a Invocation, key: &str) -> Result<&'a str> 
     invocation
         .param(key)
         .ok_or_else(|| anyhow!("faltó `{key}=...`"))
+}
+
+fn param_any<'a>(invocation: &'a Invocation, keys: &[&str]) -> Option<&'a str> {
+    keys.iter().find_map(|key| invocation.param(key))
+}
+
+fn required_param_any<'a>(invocation: &'a Invocation, keys: &[&str]) -> Result<&'a str> {
+    param_any(invocation, keys).ok_or_else(|| {
+        let expected = keys
+            .iter()
+            .map(|key| format!("`{key}=...`"))
+            .collect::<Vec<_>>()
+            .join(" o ");
+        anyhow!("faltó {expected}")
+    })
+}
+
+fn warn_frontmatter_error(path: &str, meta: &crate::vault::MarkdownMeta) {
+    if let Some(error) = meta.frontmatter_error.as_deref() {
+        eprintln!("[warn] frontmatter inválido en {path}: {error}");
+    }
 }
 
 fn key_value_block(entries: &[(&str, String)]) -> String {
@@ -1069,7 +1106,7 @@ impl App {
             invocation.param("path"),
             active_file.as_deref(),
         )?;
-        let name = required_param(invocation, "name")?;
+        let name = required_param_any(invocation, &["name", "to"])?;
         let next = vault.rename_path(&from, name)?;
         if active_file.as_deref() == Some(from.as_str()) {
             self.workspace.set_active_file(&vault, &next);
@@ -1422,6 +1459,7 @@ impl App {
                 .markdown
                 .get(&rel)
                 .ok_or_else(|| anyhow!("solo aplica a archivos Markdown"))?;
+            warn_frontmatter_error(&rel, meta);
             if invocation.has_flag("total") {
                 return Ok(meta.tags.len().to_string());
             }
@@ -1429,7 +1467,8 @@ impl App {
         }
 
         let mut counts = HashMap::<String, usize>::new();
-        for meta in index.markdown.values() {
+        for (path, meta) in &index.markdown {
+            warn_frontmatter_error(path, meta);
             for tag in &meta.tags {
                 if let Some(count) = counts.get_mut(tag) {
                     *count += 1;
@@ -1605,6 +1644,7 @@ impl App {
                 .markdown
                 .get(&rel)
                 .ok_or_else(|| anyhow!("solo aplica a archivos Markdown"))?;
+            warn_frontmatter_error(&rel, meta);
             return render_json_rows(
                 alias_rows(meta),
                 invocation.param("format"),
@@ -1614,6 +1654,7 @@ impl App {
 
         let mut rows = Vec::new();
         for (path, meta) in &index.markdown {
+            warn_frontmatter_error(path, meta);
             for alias in &meta.aliases {
                 rows.push(json!({ "path": path, "alias": alias }));
             }
@@ -1640,6 +1681,7 @@ impl App {
                 .markdown
                 .get(&rel)
                 .ok_or_else(|| anyhow!("solo aplica a archivos Markdown"))?;
+            warn_frontmatter_error(&rel, meta);
             if invocation.param("format") == Some("yaml") {
                 return Ok(serde_yaml::to_string(&meta.properties)?);
             }
@@ -1650,9 +1692,10 @@ impl App {
             );
         }
 
-        let name_filter = invocation.param("name");
+        let name_filter = param_any(invocation, &["name", "key"]);
         let mut counts = HashMap::<String, usize>::new();
-        for meta in index.markdown.values() {
+        for (path, meta) in &index.markdown {
+            warn_frontmatter_error(path, meta);
             for name in meta.properties.keys() {
                 if name_filter.is_none_or(|target| target == name) {
                     if let Some(count) = counts.get_mut(name) {
@@ -1683,7 +1726,7 @@ impl App {
             invocation.param("path"),
             active_file.as_deref(),
         )?;
-        let name = required_param(invocation, "name")?;
+        let name = required_param_any(invocation, &["name", "key"])?;
         let value = required_param(invocation, "value")?;
         let abs = vault.rel_to_abs(&rel)?;
         let original = fs::read_to_string(&abs)?;
@@ -1706,7 +1749,7 @@ impl App {
             invocation.param("path"),
             active_file.as_deref(),
         )?;
-        let name = required_param(invocation, "name")?;
+        let name = required_param_any(invocation, &["name", "key"])?;
         let abs = vault.rel_to_abs(&rel)?;
         let original = fs::read_to_string(&abs)?;
         let (_, body) = split_frontmatter(&original);
@@ -1725,11 +1768,12 @@ impl App {
             invocation.param("path"),
             active_file.as_deref(),
         )?;
-        let name = required_param(invocation, "name")?;
+        let name = required_param_any(invocation, &["name", "key"])?;
         let meta = index
             .markdown
             .get(&rel)
             .ok_or_else(|| anyhow!("solo aplica a archivos Markdown"))?;
+        warn_frontmatter_error(&rel, meta);
         let value = meta
             .properties
             .get(name)
