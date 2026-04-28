@@ -109,6 +109,29 @@ impl Workspace {
         Ok(())
     }
 
+    pub fn refresh_known_vaults(&mut self) -> Result<()> {
+        let cache_file = self.runtime.cache_dir.join("known-vaults.json");
+        if cache_file.exists() {
+            fs::remove_file(cache_file)?;
+        }
+        fs::create_dir_all(&self.runtime.cache_dir)?;
+        let mut known_vaults = discover_known_vaults_uncached();
+        known_vaults.sort_by(|left, right| left.name.cmp(&right.name));
+        known_vaults.dedup_by(|left, right| left.path == right.path);
+
+        let cache = KnownVaultsCache {
+            version: 1,
+            scanned_at_ms: to_millis(Some(SystemTime::now())),
+            vaults: known_vaults.clone(),
+        };
+        atomic_write_bytes(
+            &self.runtime.cache_dir.join("known-vaults.json"),
+            &serde_json::to_vec(&cache)?,
+        )?;
+        self.known_vaults = known_vaults;
+        Ok(())
+    }
+
     pub fn open_vault(&self, selector: Option<&str>) -> Result<VaultContext> {
         let vault = self.resolve_vault(selector)?;
         Ok(VaultContext::new(self.runtime.clone(), vault))
@@ -1441,7 +1464,10 @@ pub fn property_rows(meta: &MarkdownMeta) -> Vec<Value> {
 }
 
 pub fn alias_rows(meta: &MarkdownMeta) -> Vec<Value> {
-    meta.aliases.iter().map(|alias| json!(alias)).collect()
+    meta.aliases
+        .iter()
+        .map(|alias| json!({ "value": alias }))
+        .collect()
 }
 
 pub fn count_bytes(records: &[FileRecord]) -> u64 {
@@ -1558,6 +1584,13 @@ mod tests {
         let template = "{{title}} - {{title}}";
         let result = apply_template_tokens(template, Some("Double"));
         assert_eq!(result, "Double - Double");
+    }
+
+    #[test]
+    fn alias_rows_use_named_value_field_for_tables() {
+        let meta = parse_markdown("---\naliases:\n  - Inbox Alias\n---\nBody\n");
+        let rows = super::alias_rows(&meta);
+        assert_eq!(rows[0]["value"], "Inbox Alias");
     }
 
     #[test]

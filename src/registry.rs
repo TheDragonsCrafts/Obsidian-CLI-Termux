@@ -51,6 +51,18 @@ pub const COMMANDS: &[CommandSpec] = &[
         SupportLevel::Local,
     ),
     spec(
+        "commands",
+        "General",
+        "Lista el inventario de comandos para humanos o LLMs",
+        SupportLevel::Local,
+    ),
+    spec(
+        "doctor",
+        "General",
+        "Diagnostica entorno Termux, runtime y vaults",
+        SupportLevel::Local,
+    ),
+    spec(
         "reload",
         "General",
         "Recarga la app de Obsidian",
@@ -813,6 +825,15 @@ mod tests {
         assert_eq!(cmd.name, "help");
         assert_eq!(cmd.category, "General");
         assert_eq!(cmd.support, SupportLevel::Local);
+    }
+
+    #[test]
+    fn test_agent_facing_commands_are_registered() {
+        let commands = find("commands").expect("Should find 'commands'");
+        assert_eq!(commands.support, SupportLevel::Local);
+
+        let doctor = find("doctor").expect("Should find 'doctor'");
+        assert_eq!(doctor.support, SupportLevel::Local);
     }
 
     #[test]

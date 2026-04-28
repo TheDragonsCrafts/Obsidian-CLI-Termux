@@ -7,7 +7,8 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use chrono::Local;
 use crossterm::event::{
-    self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEventKind,
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
+    KeyModifiers, MouseEventKind,
 };
 use crossterm::execute;
 use crossterm::terminal::{
@@ -1117,14 +1118,18 @@ fn history_next(state: &mut DashboardState) {
 fn setup_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     Ok(Terminal::new(backend)?)
 }
 
 fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    execute!(
+        terminal.backend_mut(),
+        DisableMouseCapture,
+        LeaveAlternateScreen
+    )?;
     terminal.show_cursor()?;
     Ok(())
 }
@@ -1163,7 +1168,7 @@ fn suggestion_tokens(
             .workspace
             .known_vaults
             .iter()
-            .map(|vault| format!("vault={}", vault.name))
+            .map(|vault| format_param_token("vault", &vault.name))
             .filter(|value| value.starts_with(&format!("vault={selector}")))
             .collect::<Vec<_>>();
         vaults.sort();
@@ -1183,6 +1188,11 @@ fn suggestion_tokens(
         .filter(|token_candidate| token.is_empty() || token_candidate.starts_with(token))
         .map(|token_candidate| (*token_candidate).to_string())
         .collect()
+}
+
+fn format_param_token(key: &str, value: &str) -> String {
+    let quoted = shlex::try_quote(value).unwrap_or_else(|_| value.into());
+    format!("{key}={quoted}")
 }
 
 fn replace_current_token(

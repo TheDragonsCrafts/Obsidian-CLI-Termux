@@ -7,6 +7,8 @@ obsidian vault=Main files
 obsidian read file=Inbox
 obsidian append file=Inbox content="hola\nmundo"
 obsidian search query="meeting notes" format=json
+obsidian --no-update commands format=json
+obsidian doctor
 ```
 
 ## Objetivo
@@ -24,6 +26,7 @@ obsidian search query="meeting notes" format=json
 
 Hoy están implementados los grupos locales principales:
 
+- diagnóstico e inventario: `doctor`, `commands`
 - archivos y carpetas: `file`, `files`, `folder`, `folders`, `open`, `create`, `read`, `append`, `prepend`, `move`, `rename`, `delete`
 - metadatos: `links`, `backlinks`, `unresolved`, `orphans`, `deadends`, `outline`, `tags`, `tag`, `tasks`, `task`, `aliases`, `properties`, `property:*`
 - daily/templates/utilidades: `daily*`, `templates`, `template:*`, `random*`, `wordcount`, `recents`, `bases`
@@ -54,6 +57,31 @@ En otras palabras: el backend local sirve para automatización fuerte sobre el v
 - Resolución de vault por `vault=<name>`, por directorio actual o por estado persistido.
 - Índice incremental cacheado por vault para headings, tags, tasks, properties, aliases y wikilinks.
 - TUI visual con navegador de comandos, sugerencias, historial persistente, scroll de salida y barra de comandos cuando se ejecuta `obsidian` sin subcomando.
+
+## Uso por LLMs y scripts
+
+Para automatización, usa `--no-update` para evitar checks de red y reinstalaciones inesperadas durante comandos no interactivos:
+
+```bash
+obsidian --no-update vault=/ruta/al/vault read file=Inbox
+```
+
+Comandos útiles para descubrir capacidades sin parsear ayuda humana:
+
+```bash
+obsidian --no-update commands format=json
+obsidian --no-update commands support=local format=json
+obsidian --no-update doctor format=json
+```
+
+Si acabas de crear o mover vaults y quieres ignorar el cache de descubrimiento:
+
+```bash
+obsidian --no-update vaults --refresh
+obsidian --no-update vaults --refresh format=json
+```
+
+`doctor` revisa entorno Termux, rutas de runtime/cache, herramientas disponibles (`pkg`, `termux-open-url`, `termux-clipboard-set`, `cargo`, `rustc`, etc.), vault activo y vaults conocidos. En JSON está pensado para que un LLM pueda decidir el siguiente paso sin depender de texto localizado.
 
 
 ## Auto-update desde GitHub

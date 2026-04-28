@@ -6,6 +6,7 @@ use anyhow::{Result, bail};
 pub struct GlobalOptions {
     pub vault: Option<String>,
     pub copy: bool,
+    pub no_update: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -46,6 +47,20 @@ pub fn parse(args: &[String]) -> Result<Request> {
     for token in args {
         if token == "--copy" {
             global.copy = true;
+            continue;
+        }
+        if token == "--no-update" {
+            global.no_update = true;
+            continue;
+        }
+
+        if command.is_none() && matches!(token.as_str(), "--help" | "-h") {
+            command = Some("help".to_string());
+            continue;
+        }
+
+        if command.is_none() && matches!(token.as_str(), "--version" | "-V") {
+            command = Some("version".to_string());
             continue;
         }
 
@@ -211,5 +226,29 @@ mod tests {
             err.to_string(),
             "faltó el comando después de los parámetros globales"
         );
+    }
+
+    #[test]
+    fn common_global_help_and_version_aliases_work() {
+        let Request::Invocation(help) = parse(&["--help".to_string()]).unwrap() else {
+            panic!("expected help invocation");
+        };
+        assert_eq!(help.command, "help");
+
+        let Request::Invocation(version) = parse(&["-V".to_string()]).unwrap() else {
+            panic!("expected version invocation");
+        };
+        assert_eq!(version.command, "version");
+    }
+
+    #[test]
+    fn parses_no_update_as_global_option() {
+        let Request::Invocation(inv) =
+            parse(&["--no-update".to_string(), "files".to_string()]).unwrap()
+        else {
+            panic!("expected invocation");
+        };
+        assert_eq!(inv.command, "files");
+        assert!(inv.global.no_update);
     }
 }

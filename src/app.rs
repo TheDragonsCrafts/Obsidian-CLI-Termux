@@ -1,4 +1,5 @@
 use std::collections::{BTreeSet, HashMap};
+use std::env;
 use std::fs;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -10,7 +11,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::parser::Invocation;
-use crate::registry::{SupportLevel, command_help, find, overview};
+use crate::registry::{COMMANDS, SupportLevel, command_help, find, localize_category, overview};
 use crate::updater;
 use crate::vault::{
     DailySettings, FileRecord, VaultContext, VaultIndex, Workspace, alias_rows,
@@ -36,6 +37,8 @@ impl App {
             "version" => self.cmd_version(),
             "update" => self.cmd_update(&invocation)?,
             "language" => self.cmd_language(&invocation)?,
+            "commands" => self.cmd_commands(&invocation)?,
+            "doctor" => self.cmd_doctor(&invocation)?,
             "vault" => self.cmd_vault(&invocation)?,
             "vault:init" => self.cmd_vault_init(&invocation)?,
             "vaults" => self.cmd_vaults(&invocation)?,
@@ -461,6 +464,34 @@ fn write_appearance(vault: &VaultContext, appearance: &AppearanceConfig) -> Resu
     Ok(())
 }
 
+fn command_exists(program: &str) -> bool {
+    if program.contains('/') || program.contains('\\') {
+        return Path::new(program).is_file();
+    }
+
+    let Some(paths) = env::var_os("PATH") else {
+        return false;
+    };
+
+    env::split_paths(&paths).any(|dir| dir.join(program).is_file())
+}
+
+fn dir_writable(path: &Path) -> bool {
+    if !path.exists() && fs::create_dir_all(path).is_err() {
+        return false;
+    }
+    tempfile::NamedTempFile::new_in(path).is_ok()
+}
+
+fn is_termux_environment() -> bool {
+    env::var("TERMUX_VERSION").is_ok()
+        || env::var("PREFIX")
+            .map(|value| value.contains("/com.termux/files/usr"))
+            .unwrap_or(false)
+        || command_exists("termux-open")
+        || command_exists("termux-open-url")
+}
+
 fn collect_snippets(vault: &VaultContext) -> Result<Vec<SnippetInfo>> {
     let appearance = read_appearance(vault)?;
     let snippets_dir = vault.obsidian_dir.join("snippets");
@@ -604,6 +635,172 @@ impl App {
         })
     }
 
+    fn cmd_commands(&self, invocation: &Invocation) -> Result<String> {
+        let support_filter = invocation.param("support");
+        let category_filter = invocation.param("category");
+        let rows = COMMANDS
+            .iter()
+            .filter(|spec| support_filter.is_none_or(|support| spec.support.label() == support))
+            .filter(|spec| category_filter.is_none_or(|category| spec.category == category))
+            .map(|spec| {
+                json!({
+                    "name": spec.name,
+                    "category": spec.category,
+                    "category_label": localize_category(spec.category, self.workspace.language()),
+                    "support": spec.support.label(),
+                    "summary": spec.summary,
+                })
+            })
+            .collect::<Vec<_>>();
+
+        if invocation.has_flag("total") {
+            return Ok(rows.len().to_string());
+        }
+
+        render_json_rows(
+            rows,
+            invocation.param("format"),
+            Some(&["name", "category", "support", "summary"]),
+        )
+    }
+
+    fn cmd_doctor(&self, invocation: &Invocation) -> Result<String> {
+        let prefix = env::var("PREFIX").unwrap_or_default();
+        let config_home = dirs::config_dir()
+            .map(|path| path.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let runtime = &self.workspace.runtime;
+        let vaults = self
+            .workspace
+            .known_vaults
+            .iter()
+            .map(|vault| {
+                let path = vault.path_buf();
+                json!({
+                    "name": vault.name,
+                    "path": vault.path,
+                    "exists": path.join(".obsidian").is_dir(),
+                })
+            })
+            .collect::<Vec<_>>();
+        let active_vault = self.workspace.resolve_vault(None).ok().map(|vault| {
+            json!({
+                "name": vault.name,
+                "path": vault.path,
+            })
+        });
+        let storage_paths = [
+            dirs::home_dir().map(|home| home.join("storage").join("shared").join("Documents")),
+            Some(Path::new("/storage/emulated/0/Documents").to_path_buf()),
+            Some(Path::new("/sdcard/Documents").to_path_buf()),
+        ];
+        let storage = storage_paths
+            .into_iter()
+            .flatten()
+            .map(|path| json!({ "path": path, "exists": path.exists() }))
+            .collect::<Vec<_>>();
+        let termux_tools = [
+            "pkg",
+            "termux-open",
+            "termux-open-url",
+            "termux-clipboard-set",
+        ]
+        .into_iter()
+        .map(|program| json!({ "program": program, "available": command_exists(program) }))
+        .collect::<Vec<_>>();
+        let cargo_tools = ["cargo", "rustc", "clang", "git"]
+            .into_iter()
+            .map(|program| json!({ "program": program, "available": command_exists(program) }))
+            .collect::<Vec<_>>();
+
+        let report = json!({
+            "ok": true,
+            "version": env!("CARGO_PKG_VERSION"),
+            "termux": is_termux_environment(),
+            "cwd": self.workspace.cwd.to_string_lossy(),
+            "prefix": prefix,
+            "config_home": config_home,
+            "auto_update_enabled": !env::var("OBSIDIAN_CLI_AUTO_UPDATE")
+                .map(|value| value == "0" || value.eq_ignore_ascii_case("false"))
+                .unwrap_or(false),
+            "runtime": {
+                "base_dir": runtime.base_dir.to_string_lossy(),
+                "cache_dir": runtime.cache_dir.to_string_lossy(),
+                "state_file": runtime.state_file.to_string_lossy(),
+                "history_file": runtime.history_file.to_string_lossy(),
+                "base_writable": dir_writable(&runtime.base_dir),
+                "cache_writable": dir_writable(&runtime.cache_dir),
+            },
+            "active_vault": active_vault,
+            "vaults": vaults,
+            "storage": storage,
+            "termux_tools": termux_tools,
+            "build_tools": cargo_tools,
+        });
+
+        if invocation.param("format") == Some("json") {
+            return Ok(serde_json::to_string_pretty(&report)?);
+        }
+
+        let mut lines = Vec::new();
+        lines.push(format!("version: {}", env!("CARGO_PKG_VERSION")));
+        lines.push(format!("termux: {}", report["termux"]));
+        lines.push(format!("cwd: {}", self.workspace.cwd.to_string_lossy()));
+        lines.push(format!(
+            "prefix: {}",
+            report["prefix"].as_str().unwrap_or("")
+        ));
+        lines.push(format!(
+            "runtime_base: {}",
+            runtime.base_dir.to_string_lossy()
+        ));
+        lines.push(format!(
+            "base_writable: {}",
+            report["runtime"]["base_writable"]
+        ));
+        lines.push(format!(
+            "cache_writable: {}",
+            report["runtime"]["cache_writable"]
+        ));
+        lines.push(format!(
+            "auto_update_enabled: {}",
+            report["auto_update_enabled"]
+        ));
+        lines.push(format!(
+            "vaults: {}",
+            report["vaults"]
+                .as_array()
+                .map(Vec::len)
+                .unwrap_or_default()
+        ));
+        if let Some(active) = report["active_vault"].as_object() {
+            lines.push(format!(
+                "active_vault: {}",
+                active
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+            ));
+        }
+        lines.push("termux_tools:".to_string());
+        for tool in report["termux_tools"].as_array().into_iter().flatten() {
+            lines.push(format!(
+                "  {}\t{}",
+                tool["program"].as_str().unwrap_or_default(),
+                tool["available"]
+            ));
+        }
+        lines.push("build_tools:".to_string());
+        for tool in report["build_tools"].as_array().into_iter().flatten() {
+            lines.push(format!(
+                "  {}\t{}",
+                tool["program"].as_str().unwrap_or_default(),
+                tool["available"]
+            ));
+        }
+        Ok(lines.join("\n"))
+    }
+
     fn cmd_vault(&self, invocation: &Invocation) -> Result<String> {
         let vault = self
             .workspace
@@ -645,7 +842,11 @@ impl App {
         Ok(vault.root.to_string_lossy().to_string())
     }
 
-    fn cmd_vaults(&self, invocation: &Invocation) -> Result<String> {
+    fn cmd_vaults(&mut self, invocation: &Invocation) -> Result<String> {
+        if invocation.has_flag("refresh") {
+            self.workspace.refresh_known_vaults()?;
+        }
+
         let mut vaults = self.workspace.known_vaults.clone();
         if vaults.is_empty()
             && let Ok(current) = self.workspace.resolve_vault(None)
