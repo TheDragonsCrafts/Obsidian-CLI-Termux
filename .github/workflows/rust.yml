@@ -7,17 +7,22 @@ on:
     branches: ["master"]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  checks:
-    name: Build, lint, and test
+  quality:
+    name: Format, lint, and scripts
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Checkout repository
@@ -28,17 +33,84 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Cache cargo dependencies and build artifacts
+      - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
+
+      - name: Validate the lockfile
+        run: cargo metadata --locked --format-version 1 > /dev/null
 
       - name: Check formatting
         run: cargo fmt --all -- --check
 
-      - name: Lint with clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Lint all targets
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
 
-      - name: Build
-        run: cargo build --verbose
+      - name: Validate shell scripts
+        run: bash -n scripts/*.sh
 
-      - name: Run tests
-        run: cargo test --verbose
+      - name: Parse PowerShell scripts
+        shell: pwsh
+        run: |
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path scripts/build-android-cross.ps1),
+            [ref]$null,
+            [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_ }
+            exit 1
+          }
+
+  tests:
+    name: Tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run all tests
+        run: cargo test --locked --all-features
+
+  android-check:
+    name: Check Android AArch64
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain and Android target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: aarch64-linux-android
+
+      - name: Configure Android NDK toolchain
+        shell: bash
+        run: |
+          toolchain="$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          test -x "$toolchain/aarch64-linux-android24-clang"
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$toolchain/aarch64-linux-android24-clang" >> "$GITHUB_ENV"
+          echo "CC_aarch64_linux_android=$toolchain/aarch64-linux-android24-clang" >> "$GITHUB_ENV"
+          echo "AR_aarch64_linux_android=$toolchain/llvm-ar" >> "$GITHUB_ENV"
+
+      - name: Check Termux target
+        run: cargo check --locked --all-features --target aarch64-linux-android

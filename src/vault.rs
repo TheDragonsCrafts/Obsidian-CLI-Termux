@@ -299,11 +299,9 @@ impl VaultContext {
     }
 
     pub fn rel_to_abs(&self, rel_path: &str) -> Result<PathBuf> {
-        let rel_path = normalize_rel_path(rel_path);
-        let abs = self.root.join(rel_path);
-        if !abs.starts_with(&self.root) {
-            bail!("path fuera del vault");
-        }
+        let rel_path = validate_rel_path(rel_path)?;
+        let abs = self.root.join(&rel_path);
+        ensure_path_within_root(&self.root, &abs)?;
         Ok(abs)
     }
 
@@ -388,7 +386,7 @@ impl VaultContext {
         if let Some(parent) = abs.parent() {
             fs::create_dir_all(parent)?;
         }
-        fs::write(abs, content)?;
+        atomic_write_bytes(&abs, content.as_bytes())?;
         Ok(())
     }
 
@@ -398,7 +396,7 @@ impl VaultContext {
             current.push('\n');
         }
         current.push_str(content);
-        fs::write(self.rel_to_abs(rel_path)?, current)?;
+        atomic_write_bytes(&self.rel_to_abs(rel_path)?, current.as_bytes())?;
         Ok(())
     }
 
@@ -420,7 +418,7 @@ impl VaultContext {
             next.push('\n');
         }
         next.push_str(body);
-        fs::write(self.rel_to_abs(rel_path)?, next)?;
+        atomic_write_bytes(&self.rel_to_abs(rel_path)?, next.as_bytes())?;
         Ok(())
     }
 
@@ -1064,7 +1062,7 @@ pub fn write_frontmatter(
         next.push_str("\n---\n");
     }
     next.push_str(body);
-    fs::write(path, next)?;
+    atomic_write_bytes(path, next.as_bytes())?;
     Ok(())
 }
 
@@ -1089,6 +1087,51 @@ pub fn normalize_rel_path(path: &str) -> String {
         }
     }
     parts.join("/")
+}
+
+fn validate_rel_path(path: &str) -> Result<String> {
+    let normalized = path.replace('\\', "/");
+    let mut parts = Vec::<String>::new();
+
+    for component in Path::new(&normalized).components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if parts.pop().is_none() {
+                    bail!("path fuera del vault: {path}");
+                }
+            }
+            Component::Normal(value) => parts.push(value.to_string_lossy().to_string()),
+            Component::RootDir | Component::Prefix(_) => {
+                bail!("se requiere un path relativo al vault: {path}");
+            }
+        }
+    }
+
+    Ok(parts.join("/"))
+}
+
+fn ensure_path_within_root(root: &Path, target: &Path) -> Result<()> {
+    let canonical_root = root
+        .canonicalize()
+        .with_context(|| format!("no se pudo resolver el vault {}", root.display()))?;
+    let mut existing = target;
+    while fs::symlink_metadata(existing).is_err() {
+        existing = existing
+            .parent()
+            .ok_or_else(|| anyhow!("path fuera del vault: {}", target.display()))?;
+    }
+    let canonical_existing = existing
+        .canonicalize()
+        .with_context(|| format!("no se pudo resolver {}", existing.display()))?;
+
+    if !canonical_existing.starts_with(&canonical_root) {
+        bail!(
+            "path fuera del vault mediante enlace simbólico: {}",
+            target.display()
+        );
+    }
+    Ok(())
 }
 
 fn score_candidate(source_dir: &str, candidate: &str) -> i32 {
@@ -1391,7 +1434,7 @@ fn write_cache(path: &Path, cache: &StoredIndex) -> Result<()> {
     Ok(())
 }
 
-fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
+pub(crate) fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
     let parent = path
         .parent()
         .ok_or_else(|| anyhow!("ruta inválida para escritura atómica: {}", path.display()))?;
@@ -1566,6 +1609,65 @@ mod tests {
     }
 
     #[test]
+    fn vault_paths_reject_absolute_and_parent_escape() {
+        let root = tempfile::tempdir().unwrap();
+        let vault_root = root.path().join("Vault");
+        std::fs::create_dir_all(vault_root.join(".obsidian")).unwrap();
+        let runtime = RuntimePaths {
+            base_dir: root.path().join("runtime"),
+            cache_dir: root.path().join("runtime/cache"),
+            state_file: root.path().join("runtime/state.json"),
+            history_file: root.path().join("runtime/history.txt"),
+        };
+        let vault = VaultContext::new(
+            runtime,
+            KnownVault {
+                name: "Vault".to_string(),
+                path: vault_root.to_string_lossy().to_string(),
+            },
+        );
+
+        assert!(vault.rel_to_abs("../outside.md").is_err());
+        assert!(
+            vault
+                .rel_to_abs(&root.path().join("absolute.md").to_string_lossy())
+                .is_err()
+        );
+        assert_eq!(
+            vault.rel_to_abs("Notes/../Inbox.md").unwrap(),
+            vault_root.join("Inbox.md")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn vault_paths_reject_symlinks_that_escape_the_vault() {
+        let root = tempfile::tempdir().unwrap();
+        let vault_root = root.path().join("Vault");
+        let outside = root.path().join("Outside");
+        std::fs::create_dir_all(vault_root.join(".obsidian")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("secret.md"), "secret").unwrap();
+        std::os::unix::fs::symlink(&outside, vault_root.join("escape")).unwrap();
+        let vault = VaultContext::new(
+            RuntimePaths {
+                base_dir: root.path().join("runtime"),
+                cache_dir: root.path().join("runtime/cache"),
+                state_file: root.path().join("runtime/state.json"),
+                history_file: root.path().join("runtime/history.txt"),
+            },
+            KnownVault {
+                name: "Vault".to_string(),
+                path: vault_root.to_string_lossy().to_string(),
+            },
+        );
+
+        assert!(vault.read_text("escape/secret.md").is_err());
+        assert!(vault.write_text("escape/new.md", "blocked", false).is_err());
+        assert!(!outside.join("new.md").exists());
+    }
+
+    #[test]
     fn converts_moment_tokens() {
         assert_eq!(moment_to_chrono("YYYY-MM-DD"), "%Y-%m-%d");
     }
@@ -1600,18 +1702,15 @@ mod tests {
 
         assert!(
             date_re.is_match(&result),
-            "Result missing or incorrect Date format: {}",
-            result
+            "Result missing or incorrect Date format: {result}"
         );
         assert!(
             time_re.is_match(&result),
-            "Result missing or incorrect Time format: {}",
-            result
+            "Result missing or incorrect Time format: {result}"
         );
         assert!(
             datetime_re.is_match(&result),
-            "Result missing or incorrect DateTime format: {}",
-            result
+            "Result missing or incorrect DateTime format: {result}"
         );
     }
 
@@ -1646,13 +1745,13 @@ mod tests {
         let root = std::env::temp_dir().join(format!("obsidian-cli-vault-dedup-{stamp}"));
         let target = root.join("Documents").join("Main");
         let alias_root = root.join("Alias");
-        let alias = alias_root.join("Main");
 
         std::fs::create_dir_all(target.join(".obsidian")).unwrap();
         std::fs::create_dir_all(&alias_root).unwrap();
 
         #[cfg(unix)]
         {
+            let alias = alias_root.join("Main");
             std::os::unix::fs::symlink(&target, &alias).unwrap();
 
             let vaults = super::normalize_known_vaults(vec![

@@ -15,8 +15,8 @@ use crate::registry::{COMMANDS, SupportLevel, command_help, find, localize_categ
 use crate::updater;
 use crate::vault::{
     DailySettings, FileRecord, VaultContext, VaultIndex, Workspace, alias_rows,
-    apply_template_tokens, count_bytes, json_string, normalize_rel_path, property_rows,
-    read_frontmatter, replace_task_status, split_frontmatter, write_frontmatter,
+    apply_template_tokens, atomic_write_bytes, count_bytes, json_string, normalize_rel_path,
+    property_rows, read_frontmatter, replace_task_status, split_frontmatter, write_frontmatter,
 };
 
 pub struct App {
@@ -483,7 +483,7 @@ fn write_json_string_list(path: &Path, values: &[String]) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(path, serde_json::to_string_pretty(values)?)?;
+    atomic_write_bytes(path, serde_json::to_string_pretty(values)?.as_bytes())?;
     Ok(())
 }
 
@@ -497,7 +497,7 @@ fn read_appearance(vault: &VaultContext) -> Result<AppearanceConfig> {
 
 fn write_appearance(vault: &VaultContext, appearance: &AppearanceConfig) -> Result<()> {
     let path = vault.obsidian_dir.join("appearance.json");
-    fs::write(path, serde_json::to_string_pretty(appearance)?)?;
+    atomic_write_bytes(&path, serde_json::to_string_pretty(appearance)?.as_bytes())?;
     Ok(())
 }
 
