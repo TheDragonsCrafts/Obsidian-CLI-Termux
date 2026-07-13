@@ -57,6 +57,8 @@ En otras palabras: el backend local sirve para automatización fuerte sobre el v
 - Resolución de vault por `vault=<name>`, por directorio actual o por estado persistido.
 - Índice incremental cacheado por vault para headings, tags, tasks, properties, aliases y wikilinks.
 - TUI visual con navegador de comandos, sugerencias, historial persistente, scroll de salida y barra de comandos cuando se ejecuta `obsidian` sin subcomando.
+- Las rutas de usuario se mantienen dentro del vault incluso ante `..`, rutas absolutas o enlaces simbólicos que apunten fuera.
+- Las escrituras de notas, frontmatter y configuración reemplazan archivos atómicamente para evitar estados parciales.
 
 ## Uso por LLMs y scripts
 
@@ -117,6 +119,16 @@ cargo build --release
 ```
 
 El binario queda como `target/release/obsidian`.
+
+Antes de enviar cambios, ejecuta las mismas comprobaciones principales del CI:
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo test --locked --all-features
+```
+
+El workflow valida además Linux y Windows, la sintaxis de los scripts de instalación y el target AArch64 usado por Termux con el NDK. Para reproducir este último check desde Windows, usa `./scripts/build-android-cross.ps1` después de instalar el NDK como se indica abajo.
 
 Build cruzada desde Windows a Android/Termux:
 

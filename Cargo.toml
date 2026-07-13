@@ -3,6 +3,11 @@ name = "obsidian-termux-cli"
 version = "0.1.1"
 edition = "2024"
 license = "MIT"
+description = "CLI local y automatizable para vaults de Obsidian en Termux"
+repository = "https://github.com/TheDragonsCrafts/Obsidian-CLI-Termux"
+readme = "README.md"
+keywords = ["obsidian", "termux", "cli", "markdown"]
+categories = ["command-line-utilities", "filesystem"]
 
 [[bin]]
 name = "obsidian"

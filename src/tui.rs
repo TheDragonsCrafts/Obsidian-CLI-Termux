@@ -627,16 +627,14 @@ fn draw_output(frame: &mut Frame<'_>, app: &App, state: &DashboardState, area: R
     let (output, ok, command) = state.last_output(app.workspace.language());
     let title = if ok {
         if app.workspace.language() == "en" {
-            format!("Last Output  [{}]", command)
+            format!("Last Output  [{command}]")
         } else {
-            format!("Última salida  [{}]", command)
+            format!("Última salida  [{command}]")
         }
+    } else if app.workspace.language() == "en" {
+        format!("Last Error  [{command}]")
     } else {
-        if app.workspace.language() == "en" {
-            format!("Last Error  [{}]", command)
-        } else {
-            format!("Último error  [{}]", command)
-        }
+        format!("Último error  [{command}]")
     };
     let paragraph = Paragraph::new(output)
         .block(panel_block(
