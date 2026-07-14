@@ -4,6 +4,11 @@ on:
   push:
     branches: ["master"]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing SemVer tag to rebuild (for example, v0.2.0)
+        required: false
+        type: string
 
 permissions: {}
 
@@ -14,6 +19,7 @@ concurrency:
 jobs:
   release_please:
     name: Version and release
+    if: github.event_name != 'workflow_dispatch' || inputs.tag == ''
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -34,7 +40,9 @@ jobs:
   build-termux:
     name: Build ${{ matrix.target }}
     needs: release_please
-    if: needs.release_please.outputs.release_created == 'true'
+    if: >-
+      always() &&
+      (needs.release_please.outputs.release_created == 'true' || inputs.tag != '')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -51,7 +59,7 @@ jobs:
       - name: Checkout released commit
         uses: actions/checkout@v7
         with:
-          ref: ${{ needs.release_please.outputs.release_sha }}
+          ref: ${{ inputs.tag || needs.release_please.outputs.release_sha }}
 
       - name: Install Rust target
         uses: dtolnay/rust-toolchain@stable
@@ -63,18 +71,21 @@ jobs:
         with:
           key: release-${{ matrix.target }}
 
-      - name: Configure Android NDK linker
+      - name: Configure Android NDK toolchain
         shell: bash
         run: |
           toolchain="$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
           test -x "$toolchain/${{ matrix.linker }}"
           target_env="$(echo '${{ matrix.target }}' | tr '[:lower:]-' '[:upper:]_')"
+          target_key="$(echo '${{ matrix.target }}' | tr '-' '_')"
           echo "CARGO_TARGET_${target_env}_LINKER=$toolchain/${{ matrix.linker }}" >> "$GITHUB_ENV"
+          echo "CC_${target_key}=$toolchain/${{ matrix.linker }}" >> "$GITHUB_ENV"
+          echo "AR_${target_key}=$toolchain/llvm-ar" >> "$GITHUB_ENV"
 
       - name: Verify tag and package versions match
         shell: bash
         env:
-          RELEASE_TAG: ${{ needs.release_please.outputs.tag_name }}
+          RELEASE_TAG: ${{ inputs.tag || needs.release_please.outputs.tag_name }}
         run: |
           package_version="$(cargo metadata --locked --no-deps --format-version 1 | jq -r '.packages[0].version')"
           test "${RELEASE_TAG#v}" = "$package_version"
@@ -94,7 +105,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ needs.release_please.outputs.tag_name }}
+          RELEASE_TAG: ${{ inputs.tag || needs.release_please.outputs.tag_name }}
         run: |
           asset="obsidian-${{ matrix.target }}"
           gh release upload "$RELEASE_TAG" "$asset" "$asset.sha256"
