@@ -1,4 +1,6 @@
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use std::hint::black_box;
+
+use criterion::{Criterion, criterion_group, criterion_main};
 
 fn contains_query_old(line: &str, query: &str, case_sensitive: bool) -> bool {
     if case_sensitive {
