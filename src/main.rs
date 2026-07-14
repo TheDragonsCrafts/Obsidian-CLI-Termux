@@ -15,15 +15,26 @@ use crate::parser::{Request, parse};
 
 fn main() -> ExitCode {
     match run() {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(exit_code) => exit_code,
         Err(error) => {
-            eprintln!("{error:#}");
+            if std::env::args().any(|arg| arg == "--agent") {
+                let message = format!("{error:#}");
+                eprintln!(
+                    "{}",
+                    serde_json::json!({
+                        "ok": false,
+                        "error": { "message": message }
+                    })
+                );
+            } else {
+                eprintln!("{error:#}");
+            }
             ExitCode::from(1)
         }
     }
 }
 
-fn run() -> Result<()> {
+fn run() -> Result<ExitCode> {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     let mut auto_updated = false;
     if should_check_auto_update(&args) {
@@ -37,7 +48,8 @@ fn run() -> Result<()> {
     }
 
     if auto_updated {
-        return relaunch_after_update(&args);
+        relaunch_after_update(&args)?;
+        return Ok(ExitCode::SUCCESS);
     }
 
     let mut app = App::load()?;
@@ -45,14 +57,34 @@ fn run() -> Result<()> {
     match parse(&args)? {
         Request::Interactive => tui::run(&mut app)?,
         Request::Invocation(invocation) => {
+            let agent = invocation.global.agent;
+            let command = invocation.command.clone();
             let output = app.execute(invocation)?;
-            if !output.is_empty() {
+            if agent {
+                let data = serde_json::from_str::<serde_json::Value>(&output)
+                    .unwrap_or(serde_json::Value::String(output));
+                let ok = data
+                    .get("ok")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(true);
+                write_stdout_line(
+                    &serde_json::json!({
+                        "ok": ok,
+                        "command": command,
+                        "data": data,
+                    })
+                    .to_string(),
+                )?;
+                if !ok {
+                    return Ok(ExitCode::from(2));
+                }
+            } else if !output.is_empty() {
                 write_stdout_line(&output)?;
             }
         }
     }
 
-    Ok(())
+    Ok(ExitCode::SUCCESS)
 }
 
 fn write_stdout_line(output: &str) -> Result<()> {
@@ -76,7 +108,10 @@ fn relaunch_after_update(args: &[String]) -> Result<()> {
 }
 
 fn should_check_auto_update(args: &[String]) -> bool {
-    if args.iter().any(|arg| arg == "--no-update") {
+    if args
+        .iter()
+        .any(|arg| matches!(arg.as_str(), "--no-update" | "--agent"))
+    {
         return false;
     }
 
@@ -102,6 +137,10 @@ mod tests {
         assert!(!should_check_auto_update(&["version".to_string()]));
         assert!(!should_check_auto_update(&[
             "--no-update".to_string(),
+            "files".to_string()
+        ]));
+        assert!(!should_check_auto_update(&[
+            "--agent".to_string(),
             "files".to_string()
         ]));
     }

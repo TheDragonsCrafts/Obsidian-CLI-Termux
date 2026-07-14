@@ -7,6 +7,7 @@ pub struct GlobalOptions {
     pub vault: Option<String>,
     pub copy: bool,
     pub no_update: bool,
+    pub agent: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -44,13 +45,41 @@ pub fn parse(args: &[String]) -> Result<Request> {
     let mut flags = BTreeSet::new();
     let mut positionals = Vec::new();
     let mut command = None;
-    for token in args {
+    let mut index = 0;
+    while index < args.len() {
+        let token = &args[index];
+        index += 1;
         if token == "--copy" {
             global.copy = true;
             continue;
         }
         if token == "--no-update" {
             global.no_update = true;
+            continue;
+        }
+        if token == "--agent" {
+            global.agent = true;
+            global.no_update = true;
+            params
+                .entry("format".to_string())
+                .or_insert_with(|| "json".to_string());
+            continue;
+        }
+        if token == "--json" {
+            params.insert("format".to_string(), "json".to_string());
+            continue;
+        }
+        if matches!(token.as_str(), "--vault" | "--format") {
+            let value = args
+                .get(index)
+                .ok_or_else(|| anyhow::anyhow!("faltó un valor después de `{token}`"))?;
+            index += 1;
+            let key = token.trim_start_matches('-');
+            if key == "vault" {
+                global.vault = Some(decode_value(value));
+            } else {
+                params.insert(key.to_string(), decode_value(value));
+            }
             continue;
         }
 
@@ -85,7 +114,12 @@ pub fn parse(args: &[String]) -> Result<Request> {
         }
 
         if let Some((key, value)) = split_param(token) {
-            params.insert(key.to_string(), decode_value(value));
+            let value = decode_value(value);
+            if key == "vault" {
+                global.vault = Some(value);
+            } else {
+                params.insert(key.to_string(), value);
+            }
             continue;
         }
 
@@ -122,6 +156,7 @@ pub fn parse_line(line: &str) -> Result<Request> {
 
 fn split_param(token: &str) -> Option<(&str, &str)> {
     let (key, value) = token.split_once('=')?;
+    let key = key.trim_start_matches('-');
     if key.is_empty() {
         return None;
     }
@@ -250,5 +285,52 @@ mod tests {
         };
         assert_eq!(inv.command, "files");
         assert!(inv.global.no_update);
+    }
+
+    #[test]
+    fn parses_agent_and_conventional_json_options() {
+        let Request::Invocation(inv) = parse(&[
+            "--agent".to_string(),
+            "--vault".to_string(),
+            "My Vault".to_string(),
+            "search".to_string(),
+            "--query=needle".to_string(),
+        ])
+        .unwrap() else {
+            panic!("expected invocation");
+        };
+
+        assert!(inv.global.agent);
+        assert!(inv.global.no_update);
+        assert_eq!(inv.global.vault.as_deref(), Some("My Vault"));
+        assert_eq!(inv.param("format"), Some("json"));
+        assert_eq!(inv.param("query"), Some("needle"));
+    }
+
+    #[test]
+    fn parses_global_format_as_separate_value() {
+        let Request::Invocation(inv) = parse(&[
+            "files".to_string(),
+            "--format".to_string(),
+            "tsv".to_string(),
+        ])
+        .unwrap() else {
+            panic!("expected invocation");
+        };
+        assert_eq!(inv.param("format"), Some("tsv"));
+    }
+
+    #[test]
+    fn vault_parameter_is_global_even_after_command() {
+        let Request::Invocation(inv) = parse(&[
+            "read".to_string(),
+            "vault=Second".to_string(),
+            "file=Inbox".to_string(),
+        ])
+        .unwrap() else {
+            panic!("expected invocation");
+        };
+        assert_eq!(inv.global.vault.as_deref(), Some("Second"));
+        assert_eq!(inv.param("vault"), None);
     }
 }

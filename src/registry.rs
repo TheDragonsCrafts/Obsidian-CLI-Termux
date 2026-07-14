@@ -63,6 +63,12 @@ pub const COMMANDS: &[CommandSpec] = &[
         SupportLevel::Local,
     ),
     spec(
+        "batch",
+        "General",
+        "Ejecuta varios comandos en un solo proceso",
+        SupportLevel::Local,
+    ),
+    spec(
         "reload",
         "General",
         "Recarga la app de Obsidian",
@@ -796,9 +802,10 @@ pub fn command_usage(name: &str) -> &'static str {
         "update" => "obsidian update [force]",
         "language" => "obsidian language [set=<es|en>|lang=<es|en>]",
         "commands" => {
-            "obsidian commands [format=json|csv|tsv] [support=local|hybrid|bridge] [category=<cat>]"
+            "obsidian commands [available] [format=json|csv|tsv] [support=local|hybrid|bridge] [category=<cat>]"
         }
-        "doctor" => "obsidian doctor",
+        "doctor" => "obsidian doctor [deep] [fix] [format=json]",
+        "batch" => "obsidian batch [file=<ruta>|input=<comandos>] [fail-fast] [format=json|jsonl]",
         "vault" => "obsidian vault [info=name|path|files|folders|size] [format=json]",
         "vaults" => "obsidian vaults [refresh] [verbose|total] [format=json]",
         "vault:open" => "obsidian vault:open name=<vault>",

@@ -1,8 +1,10 @@
 use std::collections::{BTreeSet, HashMap};
 use std::env;
 use std::fs;
+use std::io::{self, IsTerminal, Read};
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::time::Instant;
 
 use anyhow::{Result, anyhow, bail};
 use csv::WriterBuilder;
@@ -10,8 +12,11 @@ use rand::prelude::IndexedRandom;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::parser::Invocation;
-use crate::registry::{COMMANDS, SupportLevel, command_help, find, localize_category, overview};
+use crate::parser::{Invocation, Request, parse_line};
+use crate::registry::{
+    COMMANDS, SupportLevel, command_aliases, command_help, command_usage, find, localize_category,
+    overview,
+};
 use crate::updater;
 use crate::vault::{
     DailySettings, FileRecord, VaultContext, VaultIndex, Workspace, alias_rows,
@@ -32,6 +37,14 @@ impl App {
     }
 
     pub fn execute(&mut self, invocation: Invocation) -> Result<String> {
+        if let Some(format) = invocation.param("format")
+            && !matches!(
+                format,
+                "text" | "json" | "jsonl" | "csv" | "tsv" | "yaml" | "tree" | "md"
+            )
+        {
+            bail!("formato no soportado: {format}");
+        }
         let output = match invocation.command.as_str() {
             "help" => self.cmd_help(&invocation)?,
             "version" => self.cmd_version(),
@@ -39,6 +52,7 @@ impl App {
             "language" => self.cmd_language(&invocation)?,
             "commands" => self.cmd_commands(&invocation)?,
             "doctor" => self.cmd_doctor(&invocation)?,
+            "batch" => self.cmd_batch(&invocation)?,
             "vault" => self.cmd_vault(&invocation)?,
             "vault:init" => self.cmd_vault_init(&invocation)?,
             "vaults" => self.cmd_vaults(&invocation)?,
@@ -129,7 +143,7 @@ impl App {
 mod tests {
     use std::collections::{BTreeMap, BTreeSet};
 
-    use super::{create_target_path, required_param_any};
+    use super::{create_target_path, required_param_any, typed_value};
     use crate::parser::{GlobalOptions, Invocation};
 
     #[test]
@@ -159,6 +173,20 @@ mod tests {
             required_param_any(&invocation, &["name", "to"]).unwrap(),
             "Nuevo"
         );
+    }
+
+    #[test]
+    fn typed_property_values_follow_documented_contract() {
+        assert_eq!(
+            typed_value(Some("bool"), "true").unwrap(),
+            serde_json::Value::Bool(true)
+        );
+        assert_eq!(
+            typed_value(Some("json"), r#"{"nested":1}"#).unwrap(),
+            serde_json::json!({"nested": 1})
+        );
+        assert!(typed_value(Some("number"), "not-a-number").is_err());
+        assert!(typed_value(Some("unknown"), "value").is_err());
     }
 }
 
@@ -427,27 +455,35 @@ fn task_matches(task: &crate::vault::TaskItem, invocation: &Invocation) -> bool 
     true
 }
 
-fn typed_value(kind: Option<&str>, raw: &str) -> Value {
+fn typed_value(kind: Option<&str>, raw: &str) -> Result<Value> {
     match kind.unwrap_or("text") {
+        "text" | "string" => Ok(Value::String(raw.to_string())),
         "number" => raw
-            .parse::<f64>()
-            .ok()
-            .and_then(serde_json::Number::from_f64)
+            .parse::<serde_json::Number>()
             .map(Value::Number)
-            .unwrap_or_else(|| Value::String(raw.to_string())),
-        "checkbox" => Value::Bool(matches!(raw, "true" | "1" | "yes" | "on")),
+            .map_err(|_| anyhow!("valor numérico inválido: {raw}")),
+        "checkbox" | "bool" | "boolean" => match raw.to_ascii_lowercase().as_str() {
+            "true" | "1" | "yes" | "on" => Ok(Value::Bool(true)),
+            "false" | "0" | "no" | "off" => Ok(Value::Bool(false)),
+            _ => bail!("valor booleano inválido: {raw}"),
+        },
+        "json" => serde_json::from_str(raw).map_err(Into::into),
         "list" => {
             if let Ok(value) = serde_json::from_str::<Value>(raw) {
-                value
+                if value.is_array() {
+                    Ok(value)
+                } else {
+                    bail!("type=list requiere un array JSON o valores separados por coma")
+                }
             } else {
-                Value::Array(
+                Ok(Value::Array(
                     raw.split(',')
                         .map(|value| Value::String(value.trim().to_string()))
                         .collect(),
-                )
+                ))
             }
         }
-        _ => Value::String(raw.to_string()),
+        other => bail!("tipo de propiedad no soportado: {other}"),
     }
 }
 
@@ -503,14 +539,42 @@ fn write_appearance(vault: &VaultContext, appearance: &AppearanceConfig) -> Resu
 
 fn command_exists(program: &str) -> bool {
     if program.contains('/') || program.contains('\\') {
-        return Path::new(program).is_file();
+        return is_executable_file(Path::new(program));
     }
 
     let Some(paths) = env::var_os("PATH") else {
         return false;
     };
 
-    env::split_paths(&paths).any(|dir| dir.join(program).is_file())
+    env::split_paths(&paths).any(|dir| {
+        if is_executable_file(&dir.join(program)) {
+            return true;
+        }
+        if cfg!(windows) {
+            return ["exe", "cmd", "bat", "com"]
+                .iter()
+                .any(|extension| is_executable_file(&dir.join(format!("{program}.{extension}"))));
+        }
+        false
+    })
+}
+
+fn is_executable_file(path: &Path) -> bool {
+    let Ok(metadata) = path.metadata() else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
 }
 
 fn dir_writable(path: &Path) -> bool {
@@ -679,6 +743,7 @@ impl App {
             .iter()
             .filter(|spec| support_filter.is_none_or(|support| spec.support.label() == support))
             .filter(|spec| category_filter.is_none_or(|category| spec.category == category))
+            .filter(|spec| !invocation.has_flag("available") || command_is_available(spec.name))
             .map(|spec| {
                 json!({
                     "name": spec.name,
@@ -686,6 +751,9 @@ impl App {
                     "category_label": localize_category(spec.category, self.workspace.language()),
                     "support": spec.support.label(),
                     "summary": spec.summary,
+                    "usage": command_usage(spec.name),
+                    "aliases": command_aliases(spec.name),
+                    "available": command_is_available(spec.name),
                 })
             })
             .collect::<Vec<_>>();
@@ -697,11 +765,28 @@ impl App {
         render_json_rows(
             rows,
             invocation.param("format"),
-            Some(&["name", "category", "support", "summary"]),
+            Some(&[
+                "name",
+                "category",
+                "support",
+                "available",
+                "summary",
+                "usage",
+                "aliases",
+            ]),
         )
     }
 
-    fn cmd_doctor(&self, invocation: &Invocation) -> Result<String> {
+    fn cmd_doctor(&mut self, invocation: &Invocation) -> Result<String> {
+        let mut repairs = Vec::new();
+        if invocation.has_flag("fix") {
+            fs::create_dir_all(&self.workspace.runtime.base_dir)?;
+            fs::create_dir_all(&self.workspace.runtime.cache_dir)?;
+            self.workspace.refresh_known_vaults()?;
+            repairs.push("runtime_directories_ensured");
+            repairs.push("vault_discovery_refreshed");
+        }
+
         let prefix = env::var("PREFIX").unwrap_or_default();
         let config_home = dirs::config_dir()
             .map(|path| path.to_string_lossy().to_string())
@@ -720,10 +805,14 @@ impl App {
                 })
             })
             .collect::<Vec<_>>();
-        let active_vault = self.workspace.resolve_vault(None).ok().map(|vault| {
+        let active_context = self
+            .workspace
+            .open_vault(invocation.global.vault.as_deref())
+            .ok();
+        let active_vault = active_context.as_ref().map(|vault| {
             json!({
                 "name": vault.name,
-                "path": vault.path,
+                "path": vault.root,
             })
         });
         let storage_paths = [
@@ -750,10 +839,141 @@ impl App {
             .map(|program| json!({ "program": program, "available": command_exists(program) }))
             .collect::<Vec<_>>();
 
+        let base_writable = dir_writable(&runtime.base_dir);
+        let cache_writable = dir_writable(&runtime.cache_dir);
+        let termux = is_termux_environment();
+        let mut checks = Vec::new();
+        let mut recommendations = Vec::new();
+
+        checks.push(json!({
+            "id": "runtime.base_writable",
+            "status": if base_writable { "ok" } else { "error" },
+            "message": if base_writable { "runtime directory is writable" } else { "runtime directory is not writable" },
+            "fix": if base_writable { Value::Null } else { json!("check storage permissions and OBSIDIAN_CLI_HOME") },
+        }));
+        checks.push(json!({
+            "id": "runtime.cache_writable",
+            "status": if cache_writable { "ok" } else { "error" },
+            "message": if cache_writable { "cache directory is writable" } else { "cache directory is not writable" },
+            "fix": if cache_writable { Value::Null } else { json!("run doctor fix or select a writable OBSIDIAN_CLI_HOME") },
+        }));
+
+        let invalid_vaults = vaults
+            .iter()
+            .filter(|vault| vault["exists"] == Value::Bool(false))
+            .count();
+        checks.push(json!({
+            "id": "vault.discovery",
+            "status": if invalid_vaults == 0 { "ok" } else { "warning" },
+            "message": if invalid_vaults == 0 {
+                format!("{} known vault(s) are valid", vaults.len())
+            } else {
+                format!("{invalid_vaults} stale vault path(s) found")
+            },
+            "fix": if invalid_vaults == 0 { Value::Null } else { json!("run doctor fix") },
+        }));
+
+        if active_vault.is_some() {
+            checks.push(json!({
+                "id": "vault.active",
+                "status": "ok",
+                "message": "an active vault can be resolved",
+            }));
+        } else {
+            checks.push(json!({
+                "id": "vault.active",
+                "status": "warning",
+                "message": "no active vault can be resolved",
+                "fix": "run vault:init path=<path> or pass --vault <name>"
+            }));
+            recommendations.push(
+                "Selecciona un vault con `--vault <name>` o inicializa uno con `vault:init`."
+                    .to_string(),
+            );
+        }
+
+        if termux && !command_exists("pkg") {
+            checks.push(json!({
+                "id": "termux.pkg",
+                "status": "error",
+                "message": "Termux was detected but pkg is unavailable",
+                "fix": "repair the Termux package environment"
+            }));
+        }
+        if termux && !command_exists("termux-open-url") {
+            checks.push(json!({
+                "id": "termux.api",
+                "status": "warning",
+                "message": "termux-open-url is unavailable",
+                "fix": "pkg install termux-api and install the Termux:API app"
+            }));
+            recommendations.push(
+                "Instala Termux:API para habilitar apertura de URLs y clipboard.".to_string(),
+            );
+        }
+
+        let mut index_report = Value::Null;
+        if invocation.has_flag("deep") || invocation.has_flag("fix") {
+            if let Some(vault) = active_context {
+                let started = Instant::now();
+                match vault.load_index() {
+                    Ok(index) => {
+                        let elapsed_ms = started.elapsed().as_millis();
+                        index_report = json!({
+                            "status": "ok",
+                            "duration_ms": elapsed_ms,
+                            "files": index.files.len(),
+                            "markdown_files": index.markdown.len(),
+                            "resolved_link_sources": index.resolved_links.len(),
+                            "unresolved_link_sources": index.unresolved_links.len(),
+                        });
+                        checks.push(json!({
+                            "id": "vault.index",
+                            "status": "ok",
+                            "message": format!("vault index loaded in {elapsed_ms} ms"),
+                        }));
+                        if invocation.has_flag("fix") {
+                            repairs.push("active_vault_index_verified");
+                        }
+                    }
+                    Err(error) => {
+                        let message = format!("{error:#}");
+                        index_report = json!({ "status": "error", "message": message });
+                        checks.push(json!({
+                            "id": "vault.index",
+                            "status": "error",
+                            "message": message,
+                            "fix": "check unreadable files and storage permissions"
+                        }));
+                    }
+                }
+            }
+        }
+
+        let errors = checks
+            .iter()
+            .filter(|check| check["status"] == "error")
+            .count();
+        let warnings = checks
+            .iter()
+            .filter(|check| check["status"] == "warning")
+            .count();
+        let passed = checks.len() - errors - warnings;
+        let status = if errors > 0 {
+            "error"
+        } else if warnings > 0 {
+            "warning"
+        } else {
+            "ok"
+        };
+
         let report = json!({
-            "ok": true,
+            "schema_version": 1,
+            "ok": errors == 0,
+            "status": status,
+            "summary": { "passed": passed, "warnings": warnings, "errors": errors },
             "version": env!("CARGO_PKG_VERSION"),
-            "termux": is_termux_environment(),
+            "termux": termux,
             "cwd": self.workspace.cwd.to_string_lossy(),
             "prefix": prefix,
             "config_home": config_home,
@@ -765,14 +985,18 @@ impl App {
                 "cache_dir": runtime.cache_dir.to_string_lossy(),
                 "state_file": runtime.state_file.to_string_lossy(),
                 "history_file": runtime.history_file.to_string_lossy(),
-                "base_writable": dir_writable(&runtime.base_dir),
-                "cache_writable": dir_writable(&runtime.cache_dir),
+                "base_writable": base_writable,
+                "cache_writable": cache_writable,
             },
             "active_vault": active_vault,
             "vaults": vaults,
             "storage": storage,
             "termux_tools": termux_tools,
             "build_tools": cargo_tools,
+            "index": index_report,
+            "checks": checks,
+            "recommendations": recommendations,
+            "repairs": repairs,
         });
 
         if invocation.param("format") == Some("json") {
@@ -780,6 +1004,10 @@ impl App {
         }
 
         let mut lines = Vec::new();
+        lines.push(format!("status: {status}"));
+        lines.push(format!(
+            "checks: {passed} passed, {warnings} warnings, {errors} errors"
+        ));
         lines.push(format!("version: {}", env!("CARGO_PKG_VERSION")));
         lines.push(format!("termux: {}", report["termux"]));
         lines.push(format!("cwd: {}", self.workspace.cwd.to_string_lossy()));
@@ -835,7 +1063,127 @@ impl App {
                 tool["available"]
             ));
         }
+        lines.push("diagnostics:".to_string());
+        for check in report["checks"].as_array().into_iter().flatten() {
+            lines.push(format!(
+                "  [{}] {}: {}",
+                check["status"].as_str().unwrap_or("unknown"),
+                check["id"].as_str().unwrap_or("unknown"),
+                check["message"].as_str().unwrap_or_default()
+            ));
+        }
+        for recommendation in report["recommendations"].as_array().into_iter().flatten() {
+            lines.push(format!(
+                "recommendation: {}",
+                recommendation.as_str().unwrap_or_default()
+            ));
+        }
         Ok(lines.join("\n"))
+    }
+
+    fn cmd_batch(&mut self, invocation: &Invocation) -> Result<String> {
+        let input = if let Some(input) = invocation.param("input") {
+            input.to_string()
+        } else if let Some(path) = invocation.param("file") {
+            fs::read_to_string(path)?
+        } else {
+            let mut stdin = io::stdin();
+            if stdin.is_terminal() {
+                bail!("batch necesita `file=<ruta>`, `input=<comandos>` o stdin redirigido");
+            }
+            let mut input = String::new();
+            stdin.read_to_string(&mut input)?;
+            input
+        };
+
+        let mut results = Vec::new();
+        let mut succeeded = 0usize;
+        let mut failed = 0usize;
+        for (offset, source) in input.lines().enumerate() {
+            let source = source.trim();
+            if source.is_empty() || source.starts_with('#') {
+                continue;
+            }
+            let line = offset + 1;
+            let result = match parse_line(source) {
+                Ok(Request::Invocation(mut nested)) if nested.command != "batch" => {
+                    if nested.global.vault.is_none() {
+                        nested.global.vault = invocation.global.vault.clone();
+                    }
+                    nested.global.no_update = true;
+                    nested.global.agent = false;
+                    if invocation.global.agent {
+                        nested
+                            .params
+                            .entry("format".to_string())
+                            .or_insert_with(|| "json".to_string());
+                    }
+                    let command = nested.command.clone();
+                    match self.execute(nested) {
+                        Ok(output) => {
+                            succeeded += 1;
+                            let data = serde_json::from_str::<Value>(&output)
+                                .unwrap_or(Value::String(output));
+                            json!({
+                                "ok": true,
+                                "line": line,
+                                "command": command,
+                                "data": data,
+                            })
+                        }
+                        Err(error) => {
+                            failed += 1;
+                            json!({
+                                "ok": false,
+                                "line": line,
+                                "command": command,
+                                "error": { "message": format!("{error:#}") },
+                            })
+                        }
+                    }
+                }
+                Ok(Request::Invocation(_)) => {
+                    failed += 1;
+                    json!({
+                        "ok": false,
+                        "line": line,
+                        "error": { "message": "batch anidado no está permitido" },
+                    })
+                }
+                Ok(Request::Interactive) => continue,
+                Err(error) => {
+                    failed += 1;
+                    json!({
+                        "ok": false,
+                        "line": line,
+                        "error": { "message": format!("{error:#}") },
+                    })
+                }
+            };
+            let failed_result = result["ok"] == Value::Bool(false);
+            results.push(result);
+            if failed_result && invocation.has_flag("fail-fast") {
+                break;
+            }
+        }
+
+        if invocation.param("format") == Some("json") {
+            return Ok(serde_json::to_string(&json!({
+                "ok": failed == 0,
+                "summary": {
+                    "total": results.len(),
+                    "succeeded": succeeded,
+                    "failed": failed,
+                },
+                "results": results,
+            }))?);
+        }
+        results
+            .iter()
+            .map(serde_json::to_string)
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map(|lines| lines.join("\n"))
+            .map_err(Into::into)
     }
 
     fn cmd_vault(&self, invocation: &Invocation) -> Result<String> {
@@ -1734,7 +2082,7 @@ impl App {
         let mut properties = read_frontmatter(&abs)?;
         properties.insert(
             name.to_string(),
-            typed_value(invocation.param("type"), value),
+            typed_value(invocation.param("type"), value)?,
         );
         write_frontmatter(&abs, &properties, body)?;
         self.workspace.set_active_file(&vault, &rel);
@@ -1810,15 +2158,20 @@ impl App {
 
     fn cmd_template_insert(&mut self, invocation: &Invocation) -> Result<String> {
         let (vault, index, active_file) = self.open_local(invocation)?;
-        let active_file = active_file.ok_or_else(|| anyhow!("no hay archivo activo"))?;
+        let target = vault.resolve_target(
+            &index,
+            invocation.param("file"),
+            invocation.param("path"),
+            active_file.as_deref(),
+        )?;
         let _ = index
             .markdown
-            .get(&active_file)
-            .ok_or_else(|| anyhow!("el archivo activo debe ser Markdown"))?;
+            .get(&target)
+            .ok_or_else(|| anyhow!("el archivo objetivo debe ser Markdown"))?;
         let name = required_param(invocation, "name")?;
-        let template = self.load_template_text(&vault, name, None)?;
-        vault.append_text(&active_file, &template, false)?;
-        Ok(active_file)
+        let template = self.load_template_text(&vault, name, invocation.param("title"))?;
+        vault.append_text(&target, &template, false)?;
+        Ok(target)
     }
 
     fn cmd_bases(&self, invocation: &Invocation) -> Result<String> {
@@ -2294,4 +2647,11 @@ impl App {
         themes.sort_by(|left, right| left.name.cmp(&right.name));
         Ok(themes)
     }
+}
+
+fn command_is_available(name: &str) -> bool {
+    find(name).is_some_and(|spec| {
+        spec.support != SupportLevel::BridgeOnly
+            && !matches!(name, "base:views" | "base:query" | "bookmark")
+    })
 }

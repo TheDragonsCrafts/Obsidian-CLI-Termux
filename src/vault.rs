@@ -104,7 +104,7 @@ impl Workspace {
             return Ok(());
         }
         let body = serde_json::to_string_pretty(&self.state)?;
-        fs::write(&self.runtime.state_file, body)?;
+        atomic_write_bytes(&self.runtime.state_file, body.as_bytes())?;
         self.dirty = false;
         Ok(())
     }
@@ -432,6 +432,9 @@ impl VaultContext {
         if let Some(parent) = to_abs.parent() {
             fs::create_dir_all(parent)?;
         }
+        if to_abs.exists() && to_abs != from_abs {
+            bail!("el destino ya existe: {to_rel}");
+        }
         fs::rename(from_abs, to_abs)?;
         Ok(to_rel)
     }
@@ -455,6 +458,9 @@ impl VaultContext {
 
         let to_rel = normalize_rel_path(&parent.join(next_name).to_string_lossy());
         let to_abs = self.rel_to_abs(&to_rel)?;
+        if to_abs.exists() && to_abs != from_abs {
+            bail!("el destino ya existe: {to_rel}");
+        }
         fs::rename(from_abs, to_abs)?;
         Ok(to_rel)
     }
@@ -475,14 +481,16 @@ impl VaultContext {
             .file_name()
             .and_then(OsStr::to_str)
             .unwrap_or("note.md");
-        let stamp = Local::now().format("%Y%m%d%H%M%S");
+        let stamp = Local::now().format("%Y%m%d%H%M%S%f");
         let target = trash_dir.join(format!("{stamp}-{file_name}"));
         fs::rename(abs, target)?;
         Ok("trashed".to_string())
     }
 
     pub fn load_index(&self) -> Result<VaultIndex> {
-        let mut previous = read_cache(&self.cache_file).unwrap_or_default();
+        let cached = read_cache(&self.cache_file).ok();
+        let mut cache_dirty = cached.is_none();
+        let mut previous = cached.unwrap_or_default();
         let mut next_entries = Vec::new();
         let mut reused = HashMap::<String, CachedFileEntry>::new();
         for entry in previous.files.drain(..) {
@@ -509,21 +517,28 @@ impl VaultContext {
                 if cached.modified_ms == modified_ms && cached.len == len {
                     cached
                 } else {
+                    cache_dirty = true;
                     build_cached_entry(&rel_path, len, modified_ms, &abs)?
                 }
             } else {
+                cache_dirty = true;
                 build_cached_entry(&rel_path, len, modified_ms, &abs)?
             };
 
             next_entries.push(current);
         }
 
+        if !reused.is_empty() {
+            cache_dirty = true;
+        }
         next_entries.sort_by(|left, right| left.rel_path.cmp(&right.rel_path));
-        let stored = StoredIndex {
-            version: INDEX_CACHE_VERSION,
-            files: next_entries.clone(),
-        };
-        write_cache(&self.cache_file, &stored)?;
+        if cache_dirty {
+            let stored = StoredIndex {
+                version: INDEX_CACHE_VERSION,
+                files: next_entries.clone(),
+            };
+            write_cache(&self.cache_file, &stored)?;
+        }
 
         let mut files = BTreeMap::new();
         for entry in &next_entries {
@@ -689,6 +704,15 @@ impl VaultIndex {
             .collect::<Vec<_>>();
 
         ranked.sort_by(|left, right| right.0.cmp(&left.0).then(left.1.cmp(&right.1)));
+        if ranked.len() > 1 && ranked[0].0 == ranked[1].0 {
+            let candidates = ranked
+                .iter()
+                .take_while(|candidate| candidate.0 == ranked[0].0)
+                .map(|candidate| candidate.1.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            bail!("selector ambiguo `{selector}`; usa path=<ruta>. candidatos: {candidates}");
+        }
         ranked
             .into_iter()
             .next()
@@ -719,10 +743,10 @@ impl VaultIndex {
         self.unresolved_links.clear();
         self.backlinks.clear();
 
-        let note_paths = self.markdown.keys().cloned().collect::<Vec<_>>();
+        let resolver = LinkResolver::new(self.markdown.keys().cloned());
         for (path, meta) in &self.markdown {
             for link in &meta.links {
-                if let Some(target) = resolve_link_target(&note_paths, link, Some(path)) {
+                if let Some(target) = resolver.resolve(link, Some(path)) {
                     *self
                         .resolved_links
                         .entry(path.clone())
@@ -919,10 +943,7 @@ fn parse_markdown_inner(text: &str, source: Option<&str>) -> MarkdownMeta {
     let mut aliases = Vec::new();
     let mut frontmatter_error = None;
     if let Some(frontmatter) = frontmatter.as_deref() {
-        let yaml_frontmatter = frontmatter
-            .trim_start_matches("---\n")
-            .trim_end_matches("\n---\n")
-            .trim_end_matches("\n...\n");
+        let yaml_frontmatter = frontmatter_yaml(frontmatter);
         match serde_yaml::from_str::<serde_yaml::Value>(yaml_frontmatter) {
             Ok(value) => {
                 if let Some(mapping) = value.as_mapping() {
@@ -971,24 +992,38 @@ fn parse_markdown_inner(text: &str, source: Option<&str>) -> MarkdownMeta {
 }
 
 pub fn split_frontmatter(text: &str) -> (Option<String>, &str) {
-    if !text.starts_with("---\n") {
+    let (opening_len, newline) = if text.starts_with("---\r\n") {
+        (5, "\r\n")
+    } else if text.starts_with("---\n") {
+        (4, "\n")
+    } else {
         return (None, text);
-    }
-    let rest = &text[4..];
-    if let Some(end) = rest.find("\n---\n") {
-        let frontmatter = &text[..(4 + end + 5)];
-        let body = &text[(4 + end + 5)..];
-        return (Some(frontmatter.to_string()), body);
-    }
-    if let Some(end) = rest.find("\n...\n") {
-        let frontmatter = &text[..(4 + end + 5)];
-        let body = &text[(4 + end + 5)..];
-        return (Some(frontmatter.to_string()), body);
+    };
+    let rest = &text[opening_len..];
+    for marker in ["---", "..."] {
+        let closing = format!("{newline}{marker}{newline}");
+        if let Some(end) = rest.find(&closing) {
+            let boundary = opening_len + end + closing.len();
+            return (Some(text[..boundary].to_string()), &text[boundary..]);
+        }
     }
     (None, text)
 }
 
+fn frontmatter_yaml(frontmatter: &str) -> &str {
+    let yaml = frontmatter
+        .strip_prefix("---\r\n")
+        .or_else(|| frontmatter.strip_prefix("---\n"))
+        .unwrap_or(frontmatter);
+    yaml.strip_suffix("\r\n---\r\n")
+        .or_else(|| yaml.strip_suffix("\r\n...\r\n"))
+        .or_else(|| yaml.strip_suffix("\n---\n"))
+        .or_else(|| yaml.strip_suffix("\n...\n"))
+        .unwrap_or(yaml)
+}
+
 pub fn replace_task_status(text: &str, line: usize, status: &str) -> Result<String> {
+    let newline = if text.contains("\r\n") { "\r\n" } else { "\n" };
     let mut lines = text.lines().map(ToString::to_string).collect::<Vec<_>>();
     let idx = line.saturating_sub(1);
     let target = lines
@@ -1010,9 +1045,9 @@ pub fn replace_task_status(text: &str, line: usize, status: &str) -> Result<Stri
         })
         .to_string();
     *target = replaced;
-    let mut next = lines.join("\n");
+    let mut next = lines.join(newline);
     if text.ends_with('\n') {
-        next.push('\n');
+        next.push_str(newline);
     }
     Ok(next)
 }
@@ -1023,10 +1058,7 @@ pub fn read_frontmatter(path: &Path) -> Result<BTreeMap<String, Value>> {
     let Some(frontmatter) = frontmatter else {
         return Ok(BTreeMap::new());
     };
-    let yaml = frontmatter
-        .trim_start_matches("---\n")
-        .trim_end_matches("\n---\n")
-        .trim_end_matches("\n...\n");
+    let yaml = frontmatter_yaml(&frontmatter);
     let yaml: serde_yaml::Value = serde_yaml::from_str(yaml)?;
     let mut result = BTreeMap::new();
     if let Some(mapping) = yaml.as_mapping() {
@@ -1055,11 +1087,15 @@ pub fn write_frontmatter(
         );
     }
     let frontmatter = serde_yaml::to_string(&yaml)?.trim_end().to_string();
+    let newline = if body.contains("\r\n") { "\r\n" } else { "\n" };
     let mut next = String::new();
     if !properties.is_empty() {
-        next.push_str("---\n");
-        next.push_str(&frontmatter);
-        next.push_str("\n---\n");
+        next.push_str("---");
+        next.push_str(newline);
+        next.push_str(&frontmatter.replace('\n', newline));
+        next.push_str(newline);
+        next.push_str("---");
+        next.push_str(newline);
     }
     next.push_str(body);
     atomic_write_bytes(path, next.as_bytes())?;
@@ -1145,71 +1181,52 @@ fn score_candidate(source_dir: &str, candidate: &str) -> i32 {
     score
 }
 
-fn resolve_link_target(
-    note_paths: &[String],
-    link: &str,
-    active_file: Option<&str>,
-) -> Option<String> {
-    let normalized = normalize_rel_path(link).trim_end_matches(".md").to_string();
-    let exact = if normalized.ends_with(".md") {
-        normalized.clone()
-    } else {
-        format!("{normalized}.md")
-    };
-    if note_paths
-        .iter()
-        .any(|path| path.eq_ignore_ascii_case(&exact))
-    {
-        return note_paths
-            .iter()
-            .find(|path| path.eq_ignore_ascii_case(&exact))
-            .cloned();
-    }
+struct LinkResolver {
+    exact: HashMap<String, String>,
+    by_stem: HashMap<String, Vec<String>>,
+}
 
-    let stem = Path::new(&normalized)
-        .file_name()
-        .and_then(OsStr::to_str)
-        .unwrap_or(&normalized)
-        .to_ascii_lowercase();
-    let source_dir = active_file
-        .and_then(|path| Path::new(path).parent())
-        .map(|path| normalize_rel_path(&path.to_string_lossy()))
-        .unwrap_or_default();
-    let mut candidates = note_paths
-        .iter()
-        .filter_map(|path| {
-            let base = Path::new(path)
+impl LinkResolver {
+    fn new(paths: impl IntoIterator<Item = String>) -> Self {
+        let mut exact = HashMap::new();
+        let mut by_stem = HashMap::<String, Vec<String>>::new();
+        for path in paths {
+            exact.insert(path.to_ascii_lowercase(), path.clone());
+            let stem = Path::new(&path)
                 .file_stem()
                 .and_then(OsStr::to_str)
-                .unwrap_or_default();
-            if base.eq_ignore_ascii_case(&stem) {
-                return Some((score_candidate(&source_dir, path), path.clone()));
-            }
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            by_stem.entry(stem).or_default().push(path);
+        }
+        Self { exact, by_stem }
+    }
 
-            let path_bytes = path.as_bytes();
-            let path_no_ext = if path.ends_with(".md")
-                || path.ends_with(".MD")
-                || path.ends_with(".mD")
-                || path.ends_with(".Md")
-            {
-                &path_bytes[..path_bytes.len() - 3]
-            } else {
-                path_bytes
-            };
+    fn resolve(&self, link: &str, active_file: Option<&str>) -> Option<String> {
+        let normalized = normalize_rel_path(link).trim_end_matches(".md").to_string();
+        let exact = format!("{normalized}.md").to_ascii_lowercase();
+        if let Some(path) = self.exact.get(&exact) {
+            return Some(path.clone());
+        }
 
-            let norm_bytes = normalized.as_bytes();
-            if path_no_ext.len() >= norm_bytes.len() {
-                let tail = &path_no_ext[path_no_ext.len() - norm_bytes.len()..];
-                if tail.eq_ignore_ascii_case(norm_bytes) {
-                    return Some((score_candidate(&source_dir, path), path.clone()));
-                }
-            }
-
-            None
-        })
-        .collect::<Vec<_>>();
-    candidates.sort_by(|left, right| right.0.cmp(&left.0).then(left.1.cmp(&right.1)));
-    candidates.into_iter().next().map(|(_, path)| path)
+        let stem = Path::new(&normalized)
+            .file_name()
+            .and_then(OsStr::to_str)
+            .unwrap_or(&normalized)
+            .to_ascii_lowercase();
+        let source_dir = active_file
+            .and_then(|path| Path::new(path).parent())
+            .map(|path| normalize_rel_path(&path.to_string_lossy()))
+            .unwrap_or_default();
+        let mut candidates = self
+            .by_stem
+            .get(&stem)?
+            .iter()
+            .map(|path| (score_candidate(&source_dir, path), path.clone()))
+            .collect::<Vec<_>>();
+        candidates.sort_by(|left, right| right.0.cmp(&left.0).then(left.1.cmp(&right.1)));
+        candidates.into_iter().next().map(|(_, path)| path)
+    }
 }
 
 fn value_to_strings(value: &Value) -> Vec<String> {
@@ -1221,10 +1238,16 @@ fn value_to_strings(value: &Value) -> Vec<String> {
 }
 
 fn runtime_paths() -> Result<RuntimePaths> {
-    let config_dir = dirs::config_dir()
-        .or_else(|| dirs::home_dir().map(|home| home.join(".config")))
-        .ok_or_else(|| anyhow!("no se pudo determinar el directorio de configuración"))?;
-    let base_dir = config_dir.join("obsidian-termux-cli");
+    let base_dir = std::env::var_os("OBSIDIAN_CLI_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .map(Ok)
+        .unwrap_or_else(|| {
+            dirs::config_dir()
+                .or_else(|| dirs::home_dir().map(|home| home.join(".config")))
+                .map(|path| path.join("obsidian-termux-cli"))
+                .ok_or_else(|| anyhow!("no se pudo determinar el directorio de configuración"))
+        })?;
     let cache_dir = base_dir.join("cache");
     let history_file = base_dir.join("history.txt");
     let state_file = base_dir.join("state.json");
@@ -1577,8 +1600,9 @@ pub fn count_bytes(records: &[FileRecord]) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        KnownVault, RuntimePaths, SessionState, VaultContext, Workspace, apply_template_tokens,
-        discover_vaults_under_roots, moment_to_chrono, normalize_rel_path, parse_markdown,
+        KnownVault, LinkResolver, RuntimePaths, SessionState, VaultContext, Workspace,
+        apply_template_tokens, discover_vaults_under_roots, moment_to_chrono, normalize_rel_path,
+        parse_markdown,
     };
 
     #[test]
@@ -1600,6 +1624,27 @@ mod tests {
 
         assert!(meta.frontmatter_error.is_some());
         assert!(meta.properties.is_empty());
+    }
+
+    #[test]
+    fn parses_and_rewrites_crlf_frontmatter_without_duplication() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("Note.md");
+        let original = "---\r\ntitle: Original\r\n---\r\nBody\r\n";
+        std::fs::write(&path, original).unwrap();
+
+        let mut properties = super::read_frontmatter(&path).unwrap();
+        assert_eq!(properties["title"], serde_json::json!("Original"));
+        properties.insert("added".to_string(), serde_json::json!(true));
+        let (_, body) = super::split_frontmatter(original);
+        super::write_frontmatter(&path, &properties, body).unwrap();
+
+        let updated = std::fs::read_to_string(path).unwrap();
+        assert!(updated.starts_with("---\r\n"));
+        assert!(updated.contains("title: Original\r\n"));
+        assert!(updated.contains("added: true\r\n"));
+        assert_eq!(updated.matches("---").count(), 2);
+        assert!(updated.ends_with("Body\r\n"));
     }
 
     #[test]
@@ -1906,5 +1951,120 @@ mod tests {
         assert_eq!(content, "Hola Mundo\nNuevo texto");
 
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn warm_index_does_not_rewrite_unchanged_cache() {
+        let root = tempfile::tempdir().unwrap();
+        let vault_root = root.path().join("Vault");
+        let runtime = RuntimePaths {
+            base_dir: root.path().join("runtime"),
+            cache_dir: root.path().join("runtime/cache"),
+            state_file: root.path().join("runtime/state.json"),
+            history_file: root.path().join("runtime/history.txt"),
+        };
+        std::fs::create_dir_all(vault_root.join(".obsidian")).unwrap();
+        std::fs::create_dir_all(&runtime.cache_dir).unwrap();
+        std::fs::write(vault_root.join("Inbox.md"), "# Inbox\n[[Other]]\n").unwrap();
+        let vault = VaultContext::new(
+            runtime,
+            KnownVault {
+                name: "Vault".to_string(),
+                path: vault_root.to_string_lossy().to_string(),
+            },
+        );
+
+        vault.load_index().unwrap();
+        let first_modified = std::fs::metadata(&vault.cache_file)
+            .unwrap()
+            .modified()
+            .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        vault.load_index().unwrap();
+        let second_modified = std::fs::metadata(&vault.cache_file)
+            .unwrap()
+            .modified()
+            .unwrap();
+
+        assert_eq!(first_modified, second_modified);
+    }
+
+    #[test]
+    fn link_resolver_uses_exact_paths_and_nearby_notes() {
+        let resolver =
+            LinkResolver::new(["FolderA/Note.md".to_string(), "FolderB/Note.md".to_string()]);
+
+        assert_eq!(
+            resolver.resolve("FolderA/Note", Some("FolderB/Source.md")),
+            Some("FolderA/Note.md".to_string())
+        );
+        assert_eq!(
+            resolver.resolve("Note", Some("FolderB/Source.md")),
+            Some("FolderB/Note.md".to_string())
+        );
+    }
+
+    #[test]
+    fn note_resolution_rejects_ambiguous_stems_without_context() {
+        let mut index = super::VaultIndex::default();
+        index.markdown.insert(
+            "FolderA/Note.md".to_string(),
+            super::MarkdownMeta::default(),
+        );
+        index.markdown.insert(
+            "FolderB/Note.md".to_string(),
+            super::MarkdownMeta::default(),
+        );
+
+        let error = index.resolve_note("Note", None).unwrap_err().to_string();
+        assert!(error.contains("selector ambiguo"));
+        assert!(error.contains("FolderA/Note.md"));
+        assert_eq!(
+            index
+                .resolve_note("Note", Some("FolderB/Source.md"))
+                .unwrap(),
+            "FolderB/Note.md"
+        );
+    }
+
+    #[test]
+    fn move_and_rename_never_replace_existing_notes() {
+        let root = tempfile::tempdir().unwrap();
+        let vault_root = root.path().join("Vault");
+        let runtime = RuntimePaths {
+            base_dir: root.path().join("runtime"),
+            cache_dir: root.path().join("runtime/cache"),
+            state_file: root.path().join("runtime/state.json"),
+            history_file: root.path().join("runtime/history.txt"),
+        };
+        std::fs::create_dir_all(vault_root.join(".obsidian")).unwrap();
+        std::fs::create_dir_all(&runtime.cache_dir).unwrap();
+        std::fs::write(vault_root.join("A.md"), "source").unwrap();
+        std::fs::write(vault_root.join("B.md"), "destination").unwrap();
+        let vault = VaultContext::new(
+            runtime,
+            KnownVault {
+                name: "Vault".to_string(),
+                path: vault_root.to_string_lossy().to_string(),
+            },
+        );
+
+        assert!(vault.move_path("A.md", "B.md").is_err());
+        assert!(vault.rename_path("A.md", "B.md").is_err());
+        assert_eq!(
+            std::fs::read_to_string(vault_root.join("A.md")).unwrap(),
+            "source"
+        );
+        assert_eq!(
+            std::fs::read_to_string(vault_root.join("B.md")).unwrap(),
+            "destination"
+        );
+    }
+
+    #[test]
+    fn task_updates_preserve_crlf_line_endings() {
+        let original = "# Tasks\r\n- [ ] Keep CRLF\r\n";
+        let updated = super::replace_task_status(original, 2, "x").unwrap();
+        assert_eq!(updated, "# Tasks\r\n- [x] Keep CRLF\r\n");
     }
 }
