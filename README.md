@@ -55,14 +55,23 @@ En otras palabras: el backend local sirve para automatización fuerte sobre el v
 ## Diseño
 
 - Resolución de vault por `vault=<name>`, por directorio actual o por estado persistido.
-- Índice incremental cacheado por vault para headings, tags, tasks, properties, aliases y wikilinks.
+- Índice incremental cacheado por vault para headings, tags, tasks, properties, aliases y wikilinks. Una lectura caliente no reescribe el cache si ningún archivo cambió y el grafo usa búsquedas indexadas por path/stem.
 - TUI visual con navegador de comandos, sugerencias, historial persistente, scroll de salida y barra de comandos cuando se ejecuta `obsidian` sin subcomando.
 - Las rutas de usuario se mantienen dentro del vault incluso ante `..`, rutas absolutas o enlaces simbólicos que apunten fuera.
 - Las escrituras de notas, frontmatter y configuración reemplazan archivos atómicamente para evitar estados parciales.
 
 ## Uso por LLMs y scripts
 
-Para automatización, usa `--no-update` para evitar checks de red y reinstalaciones inesperadas durante comandos no interactivos:
+Para agentes de terminal se recomienda `--agent`. Desactiva auto-update, selecciona JSON compacto, envuelve incluso resultados vacíos de forma estable y emite errores JSON por `stderr` con exit code distinto de cero. Los diagnósticos o lotes cuyo payload tenga `ok=false` terminan con código 2:
+
+```bash
+obsidian --agent --vault /ruta/al/vault files
+obsidian --agent search --query="meeting notes" --vault Main
+```
+
+También se aceptan `--json`, `--format json`, `--vault Main` y parámetros convencionales `--query=texto`, además de la sintaxis compatible `format=json`, `vault=Main` y `query=texto`.
+
+Para scripts que necesitan conservar la salida original, usa `--no-update`:
 
 ```bash
 obsidian --no-update vault=/ruta/al/vault read file=Inbox
@@ -71,9 +80,23 @@ obsidian --no-update vault=/ruta/al/vault read file=Inbox
 Comandos útiles para descubrir capacidades sin parsear ayuda humana:
 
 ```bash
-obsidian --no-update commands format=json
+obsidian --agent commands available
 obsidian --no-update commands support=local format=json
-obsidian --no-update doctor format=json
+obsidian --agent doctor deep
+```
+
+`commands` incluye `usage` y `aliases` por comando en sus salidas estructuradas, de modo que un agente puede descubrir la invocación correcta en una sola llamada.
+
+Para evitar el costo de iniciar un proceso por operación, `batch` ejecuta varias líneas en la misma sesión. Devuelve JSONL por defecto o un resumen JSON cuando se usa `--agent`/`format=json`:
+
+```bash
+printf '%s\n' \
+  'files ext=md total' \
+  'search query="project alpha" limit=10 format=json' \
+  'tasks todo format=json' \
+  | obsidian --agent --vault Main batch
+
+obsidian --agent --vault Main batch file=commands.txt fail-fast
 ```
 
 Si acabas de crear o mover vaults y quieres ignorar el cache de descubrimiento:
@@ -83,7 +106,13 @@ obsidian --no-update vaults --refresh
 obsidian --no-update vaults --refresh format=json
 ```
 
-`doctor` revisa entorno Termux, rutas de runtime/cache, herramientas disponibles (`pkg`, `termux-open-url`, `termux-clipboard-set`, `cargo`, `rustc`, etc.), vault activo y vaults conocidos. En JSON está pensado para que un LLM pueda decidir el siguiente paso sin depender de texto localizado.
+`doctor` revisa entorno Termux, rutas de runtime/cache, herramientas disponibles (`pkg`, `termux-open-url`, `termux-clipboard-set`, `cargo`, `rustc`, etc.), vault activo y vaults conocidos. Ya no reporta éxito incondicional: entrega `status`, conteos, checks y reparaciones concretas.
+
+```bash
+obsidian doctor                 # diagnóstico rápido
+obsidian --agent doctor deep    # además carga y verifica el índice del vault
+obsidian --agent doctor fix     # recrea runtime, refresca vaults y verifica/actualiza el índice activo
+```
 
 
 ## Auto-update desde GitHub
