@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.1](https://github.com/TheDragonsCrafts/Obsidian-CLI-Termux/compare/v0.2.0...v0.2.1) (2026-07-14)
+
+
+### Bug Fixes
+
+* configure Android C toolchain for releases ([8cf8b0c](https://github.com/TheDragonsCrafts/Obsidian-CLI-Termux/commit/8cf8b0cfd9e24a86bb5138d557d43ec769defc3e))
+* configure Android C toolchain for releases ([5c3ea76](https://github.com/TheDragonsCrafts/Obsidian-CLI-Termux/commit/5c3ea766bab36b5697dc59de3cdd76f90a6b1dfc))
+* support updated hashing and benchmark APIs ([2ef7bfe](https://github.com/TheDragonsCrafts/Obsidian-CLI-Termux/commit/2ef7bfec367cbf0277ec755227ddea56d6c65d7f))
+
 ## [0.2.0](https://github.com/TheDragonsCrafts/Obsidian-CLI-Termux/compare/v0.1.1...v0.2.0) (2026-07-14)
 
 
