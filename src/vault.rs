@@ -1473,7 +1473,7 @@ pub(crate) fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
 fn vault_hash(root: &Path) -> String {
     let mut sha1 = Sha1::new();
     sha1.update(root.to_string_lossy().as_bytes());
-    format!("{:x}", sha1.finalize())
+    crate::encoding::lowercase_hex(sha1.finalize())
 }
 
 fn vault_name(path: &Path) -> String {

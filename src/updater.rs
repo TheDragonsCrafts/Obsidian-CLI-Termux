@@ -223,7 +223,7 @@ fn verify_sha256(binary: &[u8], checksum_file: &[u8], asset_name: &str) -> Resul
     if expected.len() != 64 || !expected.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         bail!("checksum SHA-256 invalido para {asset_name}");
     }
-    let actual = format!("{:x}", Sha256::digest(binary));
+    let actual = crate::encoding::lowercase_hex(Sha256::digest(binary));
     if !actual.eq_ignore_ascii_case(expected) {
         bail!("checksum SHA-256 no coincide para {asset_name}");
     }

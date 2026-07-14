@@ -1,4 +1,5 @@
 mod app;
+mod encoding;
 mod parser;
 mod registry;
 mod tui;
