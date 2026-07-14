@@ -913,39 +913,39 @@ impl App {
         }
 
         let mut index_report = Value::Null;
-        if invocation.has_flag("deep") || invocation.has_flag("fix") {
-            if let Some(vault) = active_context {
-                let started = Instant::now();
-                match vault.load_index() {
-                    Ok(index) => {
-                        let elapsed_ms = started.elapsed().as_millis();
-                        index_report = json!({
-                            "status": "ok",
-                            "duration_ms": elapsed_ms,
-                            "files": index.files.len(),
-                            "markdown_files": index.markdown.len(),
-                            "resolved_link_sources": index.resolved_links.len(),
-                            "unresolved_link_sources": index.unresolved_links.len(),
-                        });
-                        checks.push(json!({
-                            "id": "vault.index",
-                            "status": "ok",
-                            "message": format!("vault index loaded in {elapsed_ms} ms"),
-                        }));
-                        if invocation.has_flag("fix") {
-                            repairs.push("active_vault_index_verified");
-                        }
+        if (invocation.has_flag("deep") || invocation.has_flag("fix"))
+            && let Some(vault) = active_context
+        {
+            let started = Instant::now();
+            match vault.load_index() {
+                Ok(index) => {
+                    let elapsed_ms = started.elapsed().as_millis();
+                    index_report = json!({
+                        "status": "ok",
+                        "duration_ms": elapsed_ms,
+                        "files": index.files.len(),
+                        "markdown_files": index.markdown.len(),
+                        "resolved_link_sources": index.resolved_links.len(),
+                        "unresolved_link_sources": index.unresolved_links.len(),
+                    });
+                    checks.push(json!({
+                        "id": "vault.index",
+                        "status": "ok",
+                        "message": format!("vault index loaded in {elapsed_ms} ms"),
+                    }));
+                    if invocation.has_flag("fix") {
+                        repairs.push("active_vault_index_verified");
                     }
-                    Err(error) => {
-                        let message = format!("{error:#}");
-                        index_report = json!({ "status": "error", "message": message });
-                        checks.push(json!({
-                            "id": "vault.index",
-                            "status": "error",
-                            "message": message,
-                            "fix": "check unreadable files and storage permissions"
-                        }));
-                    }
+                }
+                Err(error) => {
+                    let message = format!("{error:#}");
+                    index_report = json!({ "status": "error", "message": message });
+                    checks.push(json!({
+                        "id": "vault.index",
+                        "status": "error",
+                        "message": message,
+                        "fix": "check unreadable files and storage permissions"
+                    }));
                 }
             }
         }
