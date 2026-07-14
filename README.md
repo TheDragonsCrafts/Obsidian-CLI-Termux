@@ -117,16 +117,18 @@ obsidian --agent doctor fix     # recrea runtime, refresca vaults y verifica/act
 
 ## Auto-update desde GitHub
 
-Al iniciar, la CLI ahora revisa (cada 12 horas) si hay una release más nueva en GitHub y, si la encuentra, ejecuta automáticamente:
-
-```bash
-cargo install --git https://github.com/<owner>/<repo>.git --bin obsidian --locked --force --root "$PREFIX"
-```
+Al iniciar, la CLI revisa cada 12 horas si existe una release estable más nueva. Por
+defecto solo avisa: nunca descarga código fuente ni ejecuta `cargo install`. El
+comando `update` descarga el binario precompilado exacto para Termux, verifica su
+SHA-256 y reemplaza el ejecutable de forma atómica.
 
 Variables útiles:
 
 - `OBSIDIAN_CLI_GITHUB_REPO=<owner>/<repo>` para indicar el repositorio exacto.
 - `OBSIDIAN_CLI_AUTO_UPDATE=0` para desactivar el auto-update.
+- `OBSIDIAN_CLI_AUTO_UPDATE_APPLY=1` para permitir que el chequeo periódico aplique
+  la actualización automáticamente. Sin esta variable solo notifica.
+- `OBSIDIAN_CLI_UPDATE_PIN=vX.Y.Z` para instalar una release concreta.
 
 También puedes forzar una actualización manual con:
 
@@ -135,11 +137,22 @@ obsidian update
 obsidian update --force
 ```
 
-`--force` reinstala aunque la versión publicada sea la misma.
+`--force` vuelve a descargar y verificar el binario aunque la versión publicada
+sea la misma.
 
 Por defecto se usa `TheDragonsCrafts/Obsidian-CLI-Termux` si no se define `OBSIDIAN_CLI_GITHUB_REPO`.
 
-Si el repo no tiene releases aún, el auto-update hace fallback a `cargo install --git` usando la rama por defecto del repositorio.
+Si no existe una release o no contiene un asset compatible, el binario instalado
+se conserva sin cambios. Actualmente se publican assets para Termux AArch64 y
+x86_64.
+
+## Releases
+
+Cada push a `master` actualiza una PR de release mediante Release Please. Los
+títulos de PR/commits deben seguir Conventional Commits (`feat:`, `fix:`, etc.).
+Al fusionar esa PR se actualizan `Cargo.toml`, `Cargo.lock` y `CHANGELOG.md`, se
+crea el tag SemVer y GitHub Actions adjunta los binarios Android junto con sus
+checksums. Las releases no se sobrescriben con código de `master` sin versionar.
 
 ## Build
 
